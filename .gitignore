@@ -1,11 +1,44 @@
-# Documentation builds and outputs
-docs/_build/
-docs/build/
-docs/site/
+```python
+# Compiled Python files
+*.pyc
+__pycache__/
 
-# Generated documentation files
-docs/*.html
-docs/*.css
-docs/*.js
-docs/_static/
-docs/_templates/
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+*.env.*
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# Dependencies
+.venv/
+venv/
+node_modules/
+
+# Build artifacts
+dist/
+build/
+target/
+
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# Cache directories
+.mypy_cache/
+.pytest_cache/
+.gradle/
+
+# System files
+.DS_Store
+Thumbs.db
+```
