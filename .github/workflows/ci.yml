@@ -23,7 +23,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}-${{ hashFiles('**/setup.py') }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
           
@@ -32,11 +32,8 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest pytest-cov jax jaxlib flax optax
         
-    - name: Install package (if setup.py exists)
-      run: |
-        if [ -f setup.py ]; then
-          pip install -e .
-        fi
+    - name: Set PYTHONPATH
+      run: echo "PYTHONPATH=${{ github.workspace }}" >> $GITHUB_ENV
         
     - name: Run tests with coverage
       run: |

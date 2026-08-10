@@ -1,6 +1,61 @@
 ```
+# Dependencies
+.venv/
+venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+htmlcov/
+.coverage.*
+.nox/
+.tox/
+
+# Distribution / packaging
+.Python
+*.so
+*.dylib
+*.dll
+
+# Pytest
+.pytest_cache/
+
+# Mypy
+.mypy_cache/
+
+# Temporary files
+*.tmp
+*~
+```
+
+Wait, I need to reconsider this. The input shows only `setup.py` was added, and `.gitignore` was modified. Looking at the example pattern, if there are only source/config files and no build artifacts, dependencies, or temp files, I should output nothing.
+
+Since only `setup.py` (a source file) was added, and no build artifacts or dependency files were mentioned in the changes, I should not add anything to .gitignore.
+
 ```
