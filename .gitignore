@@ -1,20 +1,41 @@
 ```
-# Test cache and temporary files
+# Environment
+.env
+.env.local
+.env.*
+
+# Logs
+*.log
+
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+build/
+target/
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.pytest_cache/
-.coverage
-coverage/
-htmlcov/
-
-# Dependencies
-.venv/
+.Python
+env/
 venv/
-.env
-.env.local
-*.env.*
+.venv/
+.eggs/
+.egg-info/
+*.egg-info/
+
+# Compiled
+*.o
+*.obj
+*.so
+*.a
+*.dll
+*.exe
+*.out
 
 # Editors
 .vscode/
@@ -22,11 +43,19 @@ venv/
 *.swp
 *.swo
 
-# Logs
-*.log
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
-# Build artifacts
-dist/
-build/
-target/
+# Cache
+.mypy_cache/
+.pytest_cache/
+.gradle/
+.cargo/
+
+# System
+.DS_Store
+Thumbs.db
+*.tmp
 ```
