@@ -46,7 +46,7 @@ class PINN:
             return total, (loss_pde, *loss_bcs)
         return total_loss
 
-    @partial(jit, static_argnames=['self', 'graphdef', 'tx', 'loss_fn'])
+    @partial(jit, static_argnames=['self', 'graphdef', 'tx'])
     def train_step(self, params, graphdef, x_collocation, tx, opt_state, loss_fn):
         def closure(p):
             model = nnx.merge(graphdef, p)
