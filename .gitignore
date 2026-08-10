@@ -1,41 +1,32 @@
 ```
-# Compiled Python files
-*.pyc
+# Test cache and temporary files
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
 
 # Dependencies
 .venv/
 venv/
-env/
-pip-log.txt
-pip-selfcheck.json
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Logs
 *.log
 
-# Temporary files
-*.tmp
-*.swp
-*~
-
-# Coverage reports
-.coverage
-htmlcov/
-.coverage.*
-
-# IDE files
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
-
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Distribution / packaging
+# Build artifacts
 dist/
 build/
-*.egg-info/
-.eggs/
+target/
 ```
