@@ -1,0 +1,11 @@
+# Documentation builds and outputs
+docs/_build/
+docs/build/
+docs/site/
+
+# Generated documentation files
+docs/*.html
+docs/*.css
+docs/*.js
+docs/_static/
+docs/_templates/
