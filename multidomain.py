@@ -71,7 +71,7 @@ class MPINN:
 
         return total_loss
 
-    @partial(jit, static_argnames=['self', 'txs', 'loss_fn'])
+    @partial(jit, static_argnames=['self', 'txs'])
     def train_step(self, params, x_collocation, txs, opt_states, loss_fn):
         def closure(p):
             return loss_fn(p, x_collocation)
