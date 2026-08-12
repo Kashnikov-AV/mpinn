@@ -2,13 +2,13 @@
 Пример использования модуля experiments для 1D задачи теплопроводности.
 Демонстрирует запуск одного эксперимента и Grid Search.
 """
-import matplotlib.pyplot as plt
 from experiments import (
     PhysicsParams, 
     TrainConfig, 
     run_experiment, 
     run_grid_search,
     show_plot,
+    show_history,
 )
 
 
@@ -51,22 +51,11 @@ def single_experiment_example():
     print(f"Обучено эпох: {metrics['epochs_trained']}")
     
     # Построение графика истории обучения
-    plt.figure(figsize=(12, 7))
-    steps = history['steps']
-    
-    plt.semilogy(steps, history['pde'], 'b', label='PDE Потери', linewidth=2)
-    plt.semilogy(steps, history['bc_0'], 'r--', label='ГУ слева', linewidth=2, alpha=0.7)
-    plt.semilogy(steps, history['bc_1'], 'r--', label='ГУ справа', linewidth=2, alpha=0.7)
-    plt.semilogy(steps, history['total_loss'], 'g--', label='Общая ошибка', linewidth=2, alpha=0.7)
-    
-    plt.title('История Обучения')
-    plt.xlabel('Эпохи')
-    plt.ylabel('Потери')
-    plt.legend(loc='upper right')
-    plt.grid(True, alpha=0.3, which="both")
-    plt.tight_layout()
-    plt.savefig('images/history_line_robin_single.png', dpi=72, bbox_inches='tight')
-    plt.show()
+    show_history(
+        history=history,
+        save_path='images/history_line_robin_single.png',
+        show_plot=True
+    )
     
     return metrics, history
 
