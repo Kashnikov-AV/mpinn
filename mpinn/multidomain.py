@@ -5,9 +5,9 @@ import flax.nnx as nnx
 import optax
 from functools import partial
 from jax import jit, value_and_grad
-import geom
+from .geom import Interval
 import matplotlib.pyplot as plt
-from pinn_core import FCNet, PINN
+from .pinn_core import FCNet, PINN
 
 class MPINN:
     def __init__(self, nets, opt, weights, phys, n_collocation=100, rng=None):
@@ -21,7 +21,7 @@ class MPINN:
 
         col_keys = jax.random.split(rng, self.n_domains)
         self.x_collocation = tuple(
-            geom.Interval(b0, b1).sample_interior(n_collocation, rng=k)
+            Interval(b0, b1).sample_interior(n_collocation, rng=k)
             for b0, b1, k in zip(self.boundaries[:-1], self.boundaries[1:], col_keys)
         )
 

@@ -10,9 +10,9 @@ from typing import Dict, List, Any, Optional, Tuple
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
-from geom import Interval
-from pinn_core import PINN, FCNet
-from bc import dirichlet_bc, robin_bc
+from .geom import Interval
+from .pinn_core import PINN, FCNet
+from .bc import dirichlet_bc, robin_bc
 from mpinn.config import PhysicsParams, TrainConfig, get_activation, get_optimizer
 from mpinn.plotting import show_plot, save_plot
 
@@ -38,8 +38,8 @@ def run_experiment(
     - metrics: словарь с метриками (mse, mape, и т.д.)
     - history: история обучения (losses по эпохам)
     """
-    from pde import line_1d
-    from analytic import line_1d_robin_exact
+    from .pde import line_1d
+    from .analytic import line_1d_robin_exact
     
     if phys is None:
         phys = PhysicsParams()
