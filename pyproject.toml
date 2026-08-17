@@ -1,0 +1,30 @@
+[project]
+name = "mpinn"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Kashnikov-AV",email = "egkashnikov@gmail.com"}
+]
+requires-python = ">=3.13"
+dependencies = [
+]
+
+packages = [
+    { include = "mpinn" }
+]
+
+exclude = [
+    ".github/",
+    "docs/",
+    "tests/",
+    "venv/",
+    "*.ipynb",
+    "main_1d.py",
+    ".gitignore",
+    "poetry.lock",  # обычно не включается, но исключим на всякий случай
+    "colocation_example.ipynb",
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
