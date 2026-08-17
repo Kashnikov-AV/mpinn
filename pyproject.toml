@@ -1,20 +1,17 @@
 [project]
 name = "mpinn"
-version = "0.1.0"
-description = ""
+version = "0.1.4"
+description = "Библиотека для решения задач стационарной тплопроводности при помощи ФИНС"
 authors = [
     {name = "Kashnikov-AV",email = "egkashnikov@gmail.com"}
 ]
 requires-python = ">=3.13"
 dependencies = [
 ]
-
+readme = "README.md"
 packages = [
     { include = "mpinn" }
 ]
-
-
-
 exclude = [
     ".github/",
     "docs/",
