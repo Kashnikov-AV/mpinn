@@ -194,23 +194,33 @@ from mpinn.pde import line_1d
 
 ### Пример 3: Многослойная задача (MPINN)
 
+**Простой пример двухслойной задачи:**
+
 ```python
+import jax.numpy as jnp
+import flax.nnx as nnx
+import optax
+
 from mpinn.multidomain import MPINN
 from mpinn.weight_strategies import FixedWeightStrategy
 from mpinn.config import PhysicsParams
+from mpinn.pinn_core import FCNet
+from mpinn.pde import line_1d
+from mpinn.bc import dirichlet_bc
 
-# Параметры для многослойной стены (3 слоя)
+# Параметры для двухслойной стены
 phys = PhysicsParams(
     x_left=0.0,
-    x_right=0.3,
-    interfaces=[0.1, 0.2],  # Границы между слоями
-    all_lambdas=[1.0, 0.5, 2.0],  # Теплопроводности слоёв
-    T_left=300.0,
-    T_right=400.0
+    x_right=0.2,
+    interfaces=[0.1],           # Один интерфейс между слоями
+    all_lambdas=[1.0, 0.5],     # Теплопроводности слоёв
+    T_left=300.0,               # Температура на левой границе
+    T_right=400.0               # Температура на правой границе
 )
 
-# Создаём по одной сети на каждый домен
-nets = [FCNet(1, 50, 1, 4, nnx.tanh, rngs) for _ in range(3)]
+# Создаём по одной сети на каждый домен (2 сети для 2 слоёв)
+rngs = nnx.Rngs(0)
+nets = tuple(FCNet(1, 50, 1, 4, nnx.tanh, rngs) for _ in range(2))
 
 # Стратегия весов
 weight_strategy = FixedWeightStrategy()
@@ -232,7 +242,99 @@ history, training_time = mpinn.fit(
     phys=phys,
     epochs=10000
 )
+
+# Предсказание
+x_test = jnp.linspace(phys.x_left, phys.x_right, 200).reshape(-1, 1)
+T_pred = mpinn.predict(x_test)
+
+# Метрики (если есть точное решение)
+# metrics = mpinn.compute_metrics(x_test, T_pred, T_exact)
 ```
+
+**Пример трёхслойной задачи с разными теплопроводностями:**
+
+```python
+from mpinn.multidomain import MPINN, compute_interface_loss
+from mpinn.weight_strategies import FixedWeightStrategy
+from mpinn.config import PhysicsParams
+from mpinn.pinn_core import FCNet
+from mpinn.pde import line_1d
+from mpinn.bc import dirichlet_bc, neuman_bc
+
+# Параметры для трёхслойной стены
+phys = PhysicsParams(
+    x_left=0.0,
+    x_right=0.3,
+    interfaces=[0.1, 0.2],        # Два интерфейса (границы между слоями)
+    all_lambdas=[1.0, 0.5, 2.0],  # Теплопроводности трёх слоёв
+    T_left=300.0,
+    T_right=400.0
+)
+
+# Создаём по одной сети на каждый домен (3 сети для 3 слоёв)
+rngs = nnx.Rngs(42)
+nets = tuple(FCNet(1, 64, 1, 5, nnx.gelu, rngs) for _ in range(3))
+
+# Стратегия весов
+weight_strategy = FixedWeightStrategy()
+
+# Инициализация MPINN
+mpinn = MPINN(
+    nets=nets,
+    opt=optax.adam(5e-4),
+    phys=phys,
+    n_collocation=150,            # 150 точек коллокации на каждый домен
+    weight_strategy=weight_strategy
+)
+
+# Граничные условия
+bc_left = lambda model: dirichlet_bc(model, x=phys.x_left, T=phys.T_left)
+bc_right = lambda model: dirichlet_bc(model, x=phys.x_right, T=phys.T_right)
+
+# Обучение
+history, training_time = mpinn.fit(
+    pde_fn=line_1d,
+    bc_left_fn=bc_left,
+    bc_right_fn=bc_right,
+    phys=phys,
+    epochs=15000,
+    log_interval=500
+)
+
+# Предсказание и визуализация
+x_test = jnp.linspace(phys.x_left, phys.x_right, 300).reshape(-1, 1)
+T_pred = mpinn.predict(x_test)
+
+# Сохранение графика с маркерами интерфейсов
+mpinn.save_plot(
+    x_test, T_pred, T_exact=None, phys=phys,
+    save_path='multilayer_solution.png',
+    title='Температурное поле в трёхслойной стене'
+)
+
+# Печать информации о структуре
+print(f"Количество доменов: {mpinn.n_domains}")
+print(f"Границы: {mpinn.boundaries}")
+print(f"Интерфейсы: {mpinn.interfaces}")
+print(f"Теплопроводности: {mpinn.all_lambdas}")
+```
+
+**Структура потерь в MPINN:**
+
+Общая функция потерь включает следующие компоненты:
+- **PDE потери**: по одной для каждого домена (`pde_0`, `pde_1`, ..., `pde_N`)
+- **Граничные условия**: `bc_left` (левая граница) и `bc_right` (правая граница)
+- **Потери на интерфейсах**: по одному для каждого интерфейса (`interface_0`, `interface_1`, ...)
+
+Для задачи с N доменами и M интерфейсами:
+- Количество PDE потерь: N
+- Количество BC потерь: 2
+- Количество interface потерь: M = N-1
+
+**Важно:** 
+- `PhysicsParams` должен содержать поля `interfaces` (кортеж координат интерфейсов) и `all_lambdas` (кортеж теплопроводностей)
+- Количество сетей в кортеже `nets` должно совпадать с количеством доменов (`len(all_lambdas)`)
+- MPINN автоматически генерирует точки коллокации для каждого домена
 
 ### Пример 4: Использование конфигурации и Early Stopping
 
@@ -359,16 +461,83 @@ print(f"MSE: {result['mse']}, MAPE: {result['mape']}")
 
 ### 6. `mpinn/multidomain.py` — Многослойные задачи (MPINN)
 
-Расширение для решения задач в многослойных средах:
+Расширение для решения задач в многослойных средах с автоматическим обеспечением условий сопряжения.
 
-- **`MPINN`** — класс для многослойных PINN
-  - Координирует несколько независимых PINN (по одной на домен)
-  - Обеспечивает непрерывность температуры и потока на интерфейсах
-  - Поддерживает адаптивные стратегии весов
+**Ключевые особенности:**
+- Координация нескольких независимых PINN (по одной на каждый домен/слой)
+- Автоматическое обеспечение непрерывности температуры на интерфейсах
+- Автоматическое обеспечение непрерывности теплового потока на интерфейсах
+- Поддержка адаптивных стратегий взвешивания потерь
+- JIT-компилированный тренировочный шаг для высокой производительности
+
+#### Класс `MPINN`
+
+```python
+MPINN(nets, opt, phys, n_collocation, weight_strategy, rng)
+```
+
+| Параметр | Описание |
+|----------|----------|
+| `nets` | Кортеж экземпляров `FCNet` (по одному на каждый домен) |
+| `opt` | Оптимизатор Optax (например, `optax.adam(lr)`) |
+| `phys` | Объект `PhysicsParams` с полями `interfaces` и `all_lambdas` |
+| `n_collocation` | Число точек коллокации на каждый домен |
+| `weight_strategy` | Стратегия взвешивания (по умолчанию `FixedWeightStrategy()`) |
+| `rng` | JAX random key для генерации точек |
+
+**Атрибуты класса:**
+- `boundaries` — кортеж всех границ (левая граница + интерфейсы + правая граница)
+- `n_domains` — количество поддоменов (слоёв)
+- `interfaces` — кортеж координат интерфейсов между слоями
+- `all_lambdas` — кортеж значений теплопроводности для каждого слоя
+- `x_collocation` — кортеж массивов точек коллокации для каждого домена
+- `pinn_instances` — кортеж независимых PINN объектов (по одному на домен)
+- `weight_strategy` — активная стратегия взвешивания потерь
 
 **Условия на интерфейсах:**
-- Непрерывность температуры: `(T_left - T_right)²`
-- Непрерывность потока: `(λ_left·dT/dx|left - λ_right·dT/dx|right)²`
+
+MPINN обеспечивает два условия сопряжения на каждом интерфейсе между слоями:
+
+1. **Непрерывность температуры:**
+   ```
+   L_interface_T = (T_left(x_int) - T_right(x_int))²
+   ```
+
+2. **Непрерывность теплового потока:**
+   ```
+   L_interface_q = (λ_left · dT/dx|left - λ_right · dT/dx|right)²
+   ```
+
+Общая потеря на интерфейсе: `L_interface = L_interface_T + L_interface_q`
+
+**Методы класса:**
+
+| Метод | Описание |
+|-------|----------|
+| `create_loss_fn(pde_fn, bc_left_fn, bc_right_fn, phys)` | Создание композитной функции потерь для многослойной задачи |
+| `train_step(params, x_collocation, txs, opt_states, loss_fn)` | Один шаг обучения для всех доменов (JIT-компилируется) |
+| `train_loop(num_steps, loss_fn, loss_names, log_interval)` | Цикл обучения с логгированием |
+| `fit(pde_fn, bc_left_fn, bc_right_fn, phys, epochs, log_interval)` | Полное обучение модели |
+| `predict(x_test)` | Предсказание температуры с учётом принадлежности к доменам |
+| `compute_metrics(x_test, t_pred, t_exact)` | Вычисление метрик ошибки (MAE, MSE, RMSE, MAPE, Max Error) |
+| `evaluate(x_test, exact_fn, phys, bc_names)` | Оценка модели против точного решения |
+| `save_plot(...)` / `show_plot(...)` | Визуализация с маркерами интерфейсов |
+
+#### Функция `compute_interface_loss`
+
+```python
+compute_interface_loss(models, interfaces, all_lambdas)
+```
+
+Вычисляет потери на интерфейсах между соседними доменами.
+
+| Параметр | Описание |
+|----------|----------|
+| `models` | Кортеж нейросетевых моделей для каждого домена |
+| `interfaces` | Кортеж x-координат интерфейсов |
+| `all_lambdas` | Кортеж значений теплопроводности для каждого домена |
+
+**Возвращает:** Список значений потерь на интерфейсах (по одному на интерфейс).
 
 [Подробнее](docs/multidomain.md)
 
@@ -491,11 +660,21 @@ MPINN(nets, opt, phys, n_collocation, weight_strategy, rng)
 | `weight_strategy` | Стратегия взвешивания (по умолчанию `FixedWeightStrategy()`) |
 | `rng` | JAX random key |
 
+**Атрибуты:**
+- `boundaries` — кортеж всех границ (левая + интерфейсы + правая)
+- `n_domains` — количество поддоменов
+- `interfaces` — кортеж координат интерфейсов
+- `all_lambdas` — кортеж теплопроводностей для каждого слоя
+- `x_collocation` — кортеж точек коллокации для каждого домена
+- `pinn_instances` — кортеж независимых PINN объектов
+
 | Метод | Описание |
 |-------|----------|
+| `create_loss_fn(pde_fn, bc_left_fn, bc_right_fn, phys)` | Создание композитной функции потерь |
 | `fit(pde_fn, bc_left_fn, bc_right_fn, phys, epochs, log_interval)` | Обучение многослойной модели |
 | `predict(x_test)` | Предсказание с учётом доменов |
 | `evaluate(x_test, exact_fn, phys, bc_names)` | Оценка метрик для многослойной задачи |
+| `compute_metrics(x_test, t_pred, t_exact)` | Вычисление метрик ошибки |
 | `save_plot(...)` / `show_plot(...)` | Визуализация с маркерами интерфейсов |
 
 ---
