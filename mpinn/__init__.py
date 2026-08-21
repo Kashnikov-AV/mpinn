@@ -7,6 +7,8 @@ from . import pde
 from . import pinn_core
 from . import plotting
 from . import runner
+from . import sources
+from . import weight_strategies
 
 __all__ = [
     'analytic',
@@ -18,4 +20,6 @@ __all__ = [
     'pinn_core',
     'plotting',
     'runner',
+    'sources',
+    'weight_strategies',
 ]

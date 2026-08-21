@@ -1,12 +1,14 @@
 import jax
 import jax.numpy as jnp
+from typing import Optional, Callable
+
 
 # Векторизованная версия line_1d для обработки всего массива точек сразу
-@jax.jit
 def line_1d(model, x, phys):
     """
-    Вычисляет невязку PDE для 1D задачи (уравнение d2y/dx2 = 0).
-    Использует vmap для векторизации вычисления производных по всем точкам.
+    Вычисляет невязку PDE для 1D задачи.
+    Без источника: d2T/dx2 = 0
+    С источником: d2T/dx2 + f(x) = 0
     
     Parameters:
     -----------
@@ -15,7 +17,7 @@ def line_1d(model, x, phys):
     x : jax.Array
         Массив координат формы (n_points, 1).
     phys : object
-        Физические параметры (не используются для этого уравнения).
+        Физические параметры, должен содержать source_fn.
     
     Returns:
     --------
@@ -32,16 +34,25 @@ def line_1d(model, x, phys):
     
     # Применяем vmap для вычисления на всех точках одновременно
     x_flat = x.ravel()
-    d2y_dx2 = jax.vmap(hessian_predict)(x_flat)
+    d2T_dx2 = jax.vmap(hessian_predict)(x_flat)
     
-    return jnp.mean(d2y_dx2 ** 2)
+    # Вычисляем источник если задан
+    source_val = 0.0
+    if hasattr(phys, 'source_fn') and phys.source_fn is not None:
+        source_val = phys.source_fn(x_flat)
+    
+    # Невязка: d2T/dx2 + f(x) = 0
+    residual = d2T_dx2 + source_val
+    
+    return jnp.mean(residual ** 2)
 
 
 @jax.jit
 def cylinder_1d(model, x, phys):
     """
     Вычисляет невязку PDE для цилиндрической геометрии.
-    Уравнение: dT/dr * (1/r) + d2T/dr2 = 0
+    Без источника: dT/dr * (1/r) + d2T/dr2 = 0
+    С источником: dT/dr * (1/r) + d2T/dr2 + f(r) = 0
     
     Parameters:
     -----------
@@ -50,7 +61,7 @@ def cylinder_1d(model, x, phys):
     x : jax.Array
         Массив радиальных координат формы (n_points, 1).
     phys : object
-        Физические параметры (не используются для этого уравнения).
+        Физические параметры, должен содержать source_fn.
     
     Returns:
     --------
@@ -72,6 +83,12 @@ def cylinder_1d(model, x, phys):
     d2T_dr2 = jax.vmap(hessian_predict)(r_flat)
     
     residual = dT_dr / r_safe + d2T_dr2
+    
+    # Вычисляем источник если задан
+    if hasattr(phys, 'source_fn') and phys.source_fn is not None:
+        source_val = phys.source_fn(r_flat)
+        residual = residual + source_val
+    
     return jnp.mean(residual ** 2)
 
 
@@ -79,7 +96,8 @@ def cylinder_1d(model, x, phys):
 def sphere_1d(model, x, phys):
     """
     Вычисляет невязку PDE для сферической геометрии.
-    Уравнение: d2y/dr2 + (2/r) * dy/dr = 0
+    Без источника: d2y/dr2 + (2/r) * dy/dr = 0
+    С источником: d2y/dr2 + (2/r) * dy/dr + f(r) = 0
     
     Parameters:
     -----------
@@ -88,7 +106,7 @@ def sphere_1d(model, x, phys):
     x : jax.Array
         Массив радиальных координат формы (n_points, 1).
     phys : object
-        Физические параметры (не используются для этого уравнения).
+        Физические параметры, должен содержать source_fn.
     
     Returns:
     --------
@@ -109,4 +127,10 @@ def sphere_1d(model, x, phys):
     d2y_dr2 = jax.vmap(hessian_predict)(r_flat)
     
     residual = d2y_dr2 + (2.0 / r_safe) * dy_dr
+    
+    # Вычисляем источник если задан
+    if hasattr(phys, 'source_fn') and phys.source_fn is not None:
+        source_val = phys.source_fn(r_flat)
+        residual = residual + source_val
+    
     return jnp.mean(residual ** 2)
