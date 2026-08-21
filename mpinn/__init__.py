@@ -14,6 +14,15 @@ from . import geom_extended
 from . import pde_2d_3d
 from . import bc_2d_3d
 
+# Экспорт новых классов геометрий
+from .geom_extended import (
+    GeometryBase,
+    Annulus2D,
+    HollowCylinder3D,
+    HollowSphere3D,
+    MeshGeometry,
+)
+
 __all__ = [
     'analytic',
     'bc',
@@ -30,4 +39,10 @@ __all__ = [
     'geom_extended',
     'pde_2d_3d',
     'bc_2d_3d',
+    # Новые классы
+    'GeometryBase',
+    'Annulus2D',
+    'HollowCylinder3D',
+    'HollowSphere3D',
+    'MeshGeometry',
 ]
