@@ -20,7 +20,7 @@ exclude = [
     "*.ipynb",
     "main_1d.py",
     ".gitignore",
-    "poetry.lock",  # обычно не включается, но исключим на всякий случай
+    "poetry.lock",
     "colocation_example.ipynb",
 ]
 
