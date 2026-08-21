@@ -1,5 +1,8 @@
-*.pyc
-*.gz
-*.whl
-*.pyc
-.vscode/settings.json
+```
+# Documentation builds and outputs
+docs/_build/
+docs/build/
+docs/*.html
+docs/*.pdf
+docs/*.epub
+```
