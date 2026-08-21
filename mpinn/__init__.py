@@ -9,6 +9,10 @@ from . import plotting
 from . import runner
 from . import sources
 from . import weight_strategies
+from . import geometry_io
+from . import geom_extended
+from . import pde_2d_3d
+from . import bc_2d_3d
 
 __all__ = [
     'analytic',
@@ -22,4 +26,8 @@ __all__ = [
     'runner',
     'sources',
     'weight_strategies',
+    'geometry_io',
+    'geom_extended',
+    'pde_2d_3d',
+    'bc_2d_3d',
 ]
