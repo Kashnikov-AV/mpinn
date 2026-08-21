@@ -2,7 +2,7 @@
 Конфигурация экспериментов: физические параметры, гиперпараметры модели и обучения.
 """
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable
 import optax
 import flax.nnx as nnx
 import jax.numpy as jnp
@@ -17,6 +17,7 @@ class PhysicsParams:
     T_inf:   float = None
     _lambda: float = None
     h:       float = None
+    source_fn: Callable = None  # Функция источника тепла f(x), по умолчанию нет источника
 
     @property
     def alpha_right(self):
