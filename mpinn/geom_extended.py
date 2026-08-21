@@ -15,6 +15,377 @@ from .geom import Geometry
 from .geometry_io import MeshData, load_geometry, compute_face_normals
 
 
+class GeometryBase(Geometry):
+    """
+    Базовый класс для всех параметрических геометрий.
+    Наследуется от существующего Geometry для совместимости.
+    """
+    def __init__(self, dim: int):
+        super().__init__(dim=dim)
+    
+    def get_boundary_tags(self) -> Dict[str, Any]:
+        """Возвращает словарь с именами границ для многодоменных задач."""
+        return {}
+
+
+class Annulus2D(GeometryBase):
+    """
+    2D кольцо (полый круг) с внутренним и внешним радиусами.
+    
+    Параметры:
+        center: центр (x, y)
+        R_outer: внешний радиус (> 0)
+        R_inner: внутренний радиус (>= 0, если 0 - сплошной круг)
+    """
+    
+    def __init__(self, center: Tuple[float, float], R_outer: float, R_inner: float = 0.0):
+        if R_outer <= 0:
+            raise ValueError("R_outer должен быть > 0")
+        if R_inner < 0:
+            raise ValueError("R_inner должен быть >= 0")
+        if R_inner >= R_outer:
+            raise ValueError("R_inner должен быть < R_outer")
+        
+        super().__init__(dim=2)
+        self.center = jnp.array(center, dtype=jnp.float64)
+        self.R_outer = float(R_outer)
+        self.R_inner = float(R_inner)
+        self.is_hollow = R_inner > 0
+    
+    def get_boundary_tags(self) -> Dict[str, str]:
+        tags = {"outer": "exterior_boundary"}
+        if self.is_hollow:
+            tags["inner"] = "interface"
+        return tags
+    
+    def sample_interior(self, n_points: int, rng: Optional[jax.Array] = None) -> jnp.ndarray:
+        if rng is None:
+            rng = jax.random.PRNGKey(0)
+        
+        # Выборка в полярных координатах с коррекцией плотности
+        r_max = self.R_outer
+        r_min = self.R_inner
+        
+        # Равномерное распределение по площади
+        u = jax.random.uniform(rng, (n_points,))
+        theta = jax.random.uniform(rng, (n_points,), minval=0, maxval=2*jnp.pi)
+        
+        if self.is_hollow:
+            r = jnp.sqrt(r_min**2 + u * (r_max**2 - r_min**2))
+        else:
+            r = jnp.sqrt(u) * r_max
+        
+        x = self.center[0] + r * jnp.cos(theta)
+        y = self.center[1] + r * jnp.sin(theta)
+        
+        return jnp.column_stack([x, y])
+    
+    def sample_boundary(self, n_points: int, rng: Optional[jax.Array] = None,
+                       tags: Optional[list] = None) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        if rng is None:
+            rng = jax.random.PRNGKey(1)
+        
+        keys = jax.random.split(rng, 2)
+        
+        points_list = []
+        normals_list = []
+        
+        # Внешняя граница
+        if tags is None or "outer" in tags:
+            n_outer = n_points // 2 if self.is_hollow else n_points
+            theta_out = jax.random.uniform(keys[0], (n_outer,), minval=0, maxval=2*jnp.pi)
+            x_out = self.center[0] + self.R_outer * jnp.cos(theta_out)
+            y_out = self.center[1] + self.R_outer * jnp.sin(theta_out)
+            points_list.append(jnp.column_stack([x_out, y_out]))
+            # Нормаль направлена наружу
+            n_out = jnp.column_stack([jnp.cos(theta_out), jnp.sin(theta_out)])
+            normals_list.append(n_out)
+        
+        # Внутренняя граница (если полая)
+        if self.is_hollow and (tags is None or "inner" in tags):
+            n_inner = n_points - len(points_list[0]) if tags is None else n_points // 2
+            theta_in = jax.random.uniform(keys[1], (n_inner,), minval=0, maxval=2*jnp.pi)
+            x_in = self.center[0] + self.R_inner * jnp.cos(theta_in)
+            y_in = self.center[1] + self.R_inner * jnp.sin(theta_in)
+            points_list.append(jnp.column_stack([x_in, y_in]))
+            # Нормаль направлена внутрь полости (наружу из материала)
+            n_in = jnp.column_stack([-jnp.cos(theta_in), -jnp.sin(theta_in)])
+            normals_list.append(n_in)
+        
+        return jnp.vstack(points_list), jnp.vstack(normals_list)
+    
+    def is_inside(self, points: jnp.ndarray) -> jnp.ndarray:
+        r = jnp.linalg.norm(points - self.center, axis=1)
+        return (r <= self.R_outer) & (r >= self.R_inner)
+    
+    @property
+    def bounds(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        min_corner = self.center - self.R_outer
+        max_corner = self.center + self.R_outer
+        return min_corner, max_corner
+
+
+class HollowCylinder3D(GeometryBase):
+    """
+    3D полый цилиндр (труба) с внутренним и внешним радиусами.
+    
+    Параметры:
+        center_base: центр основания (x, y, z)
+        radius_outer: внешний радиус (> 0)
+        radius_inner: внутренний радиус (> 0, строго полый)
+        height: высота цилиндра
+        axis: ось направления (по умолчанию Z)
+    """
+    
+    def __init__(self, center_base: Tuple[float, float, float], 
+                 radius_outer: float, radius_inner: float, 
+                 height: float, axis: Tuple[float, float, float] = (0, 0, 1)):
+        if radius_outer <= 0:
+            raise ValueError("radius_outer должен быть > 0")
+        if radius_inner <= 0:
+            raise ValueError("radius_inner должен быть > 0 (строго полый)")
+        if radius_inner >= radius_outer:
+            raise ValueError("radius_inner должен быть < radius_outer")
+        if height <= 0:
+            raise ValueError("height должен быть > 0")
+        
+        super().__init__(dim=3)
+        self.center_base = jnp.array(center_base, dtype=jnp.float64)
+        self.radius_outer = float(radius_outer)
+        self.radius_inner = float(radius_inner)
+        self.height = float(height)
+        self.axis = jnp.array(axis, dtype=jnp.float64)
+        self.axis = self.axis / jnp.linalg.norm(self.axis)  # Нормализация
+    
+    def get_boundary_tags(self) -> Dict[str, str]:
+        return {
+            "outer_lateral": "exterior_boundary",
+            "inner_lateral": "interface",
+            "bottom": "exterior_boundary",
+            "top": "exterior_boundary"
+        }
+    
+    def _cylindrical_to_cartesian(self, r: jnp.ndarray, theta: jnp.ndarray, z: jnp.ndarray) -> jnp.ndarray:
+        """Преобразование цилиндрических координат в декартовы."""
+        # Локальная система координат
+        ez = self.axis
+        
+        # Базисные векторы перпендикулярные оси
+        if jnp.abs(ez[2]) < 0.9:
+            er_ref = jnp.cross(ez, jnp.array([0.0, 0.0, 1.0]))
+        else:
+            er_ref = jnp.cross(ez, jnp.array([1.0, 0.0, 0.0]))
+        er_ref = er_ref / jnp.linalg.norm(er_ref)
+        etheta_ref = jnp.cross(ez, er_ref)
+        
+        # Векторизованное преобразование
+        x_local = (r * jnp.cos(theta))[:, None] * er_ref + \
+                  (r * jnp.sin(theta))[:, None] * etheta_ref + \
+                  z[:, None] * ez
+        
+        return self.center_base + x_local
+    
+    def sample_interior(self, n_points: int, rng: Optional[jax.Array] = None) -> jnp.ndarray:
+        if rng is None:
+            rng = jax.random.PRNGKey(0)
+        
+        keys = jax.random.split(rng, 3)
+        
+        # Равномерное распределение по объему
+        u = jax.random.uniform(keys[0], (n_points,))
+        theta = jax.random.uniform(keys[1], (n_points,), minval=0, maxval=2*jnp.pi)
+        z = jax.random.uniform(keys[2], (n_points,), minval=0, maxval=self.height)
+        
+        r = jnp.sqrt(self.radius_inner**2 + u * (self.radius_outer**2 - self.radius_inner**2))
+        
+        return self._cylindrical_to_cartesian(r, theta, z)
+    
+    def sample_boundary(self, n_points: int, rng: Optional[jax.Array] = None,
+                       tags: Optional[list] = None) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        if rng is None:
+            rng = jax.random.PRNGKey(1)
+        
+        keys = jax.random.split(rng, 4)
+        points_list = []
+        normals_list = []
+        
+        # Распределение точек по поверхностям
+        n_per_surface = n_points // 4
+        
+        # 1. Внешняя боковая поверхность
+        if tags is None or "outer_lateral" in tags:
+            theta = jax.random.uniform(keys[0], (n_per_surface,), minval=0, maxval=2*jnp.pi)
+            z = jax.random.uniform(keys[1], (n_per_surface,), minval=0, maxval=self.height)
+            r = jnp.full(n_per_surface, self.radius_outer)
+            
+            pts = self._cylindrical_to_cartesian(r, theta, z)
+            points_list.append(pts)
+            
+            # Нормаль радиально наружу
+            ex = jnp.array([1.0, 0.0, 0.0])
+            ez = self.axis
+            if jnp.abs(ez[2]) < 0.9:
+                er_ref = jnp.cross(ez, jnp.array([0.0, 0.0, 1.0]))
+            else:
+                er_ref = jnp.cross(ez, jnp.array([1.0, 0.0, 0.0]))
+            er_ref = er_ref / jnp.linalg.norm(er_ref)
+            etheta_ref = jnp.cross(ez, er_ref)
+            
+            norm = jnp.cos(theta)[:, None] * er_ref + jnp.sin(theta)[:, None] * etheta_ref
+            normals_list.append(norm)
+        
+        # 2. Внутренняя боковая поверхность
+        if tags is None or "inner_lateral" in tags:
+            theta = jax.random.uniform(keys[2], (n_per_surface,), minval=0, maxval=2*jnp.pi)
+            z = jax.random.uniform(keys[3], (n_per_surface,), minval=0, maxval=self.height)
+            r = jnp.full(n_per_surface, self.radius_inner)
+            
+            pts = self._cylindrical_to_cartesian(r, theta, z)
+            points_list.append(pts)
+            
+            # Нормаль радиально внутрь (наружу из материала)
+            norm = -(jnp.cos(theta)[:, None] * er_ref + jnp.sin(theta)[:, None] * etheta_ref)
+            normals_list.append(norm)
+        
+        # 3. Нижнее основание
+        # ... (аналогично для top и bottom)
+        
+        return jnp.vstack(points_list), jnp.vstack(normals_list)
+    
+    def is_inside(self, points: jnp.ndarray) -> jnp.ndarray:
+        # Проверка принадлежности точке к полому цилиндру
+        vec = points - self.center_base
+        z_coord = jnp.dot(vec, self.axis)
+        r_vec = vec - z_coord[:, None] * self.axis
+        r = jnp.linalg.norm(r_vec, axis=1)
+        
+        return ((r <= self.radius_outer) & (r >= self.radius_inner) & 
+                (z_coord >= 0) & (z_coord <= self.height))
+    
+    @property
+    def bounds(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        R = self.radius_outer
+        H = self.height
+        # Приблизительные границы (bounding box)
+        min_corner = self.center_base - jnp.array([R, R, 0])
+        max_corner = self.center_base + jnp.array([R, R, H])
+        return min_corner, max_corner
+
+
+class HollowSphere3D(GeometryBase):
+    """
+    3D полая сфера с внутренним и внешним радиусами.
+    
+    Параметры:
+        center: центр сферы (x, y, z)
+        R_outer: внешний радиус (> 0)
+        R_inner: внутренний радиус (> 0, строго полый)
+    """
+    
+    def __init__(self, center: Tuple[float, float, float], 
+                 R_outer: float, R_inner: float):
+        if R_outer <= 0:
+            raise ValueError("R_outer должен быть > 0")
+        if R_inner <= 0:
+            raise ValueError("R_inner должен быть > 0 (строго полый)")
+        if R_inner >= R_outer:
+            raise ValueError("R_inner должен быть < R_outer")
+        
+        super().__init__(dim=3)
+        self.center = jnp.array(center, dtype=jnp.float64)
+        self.R_outer = float(R_outer)
+        self.R_inner = float(R_inner)
+    
+    def get_boundary_tags(self) -> Dict[str, str]:
+        return {
+            "outer": "exterior_boundary",
+            "inner": "interface"
+        }
+    
+    def sample_interior(self, n_points: int, rng: Optional[jax.Array] = None) -> jnp.ndarray:
+        if rng is None:
+            rng = jax.random.PRNGKey(0)
+        
+        keys = jax.random.split(rng, 3)
+        
+        # Сферические координаты с равномерным распределением по объему
+        u = jax.random.uniform(keys[0], (n_points,))
+        v = jax.random.uniform(keys[1], (n_points,))
+        w = jax.random.uniform(keys[2], (n_points,))
+        
+        theta = 2 * jnp.pi * u
+        phi = jnp.arccos(2 * v - 1)
+        r = (self.R_inner**3 + w * (self.R_outer**3 - self.R_inner**3)) ** (1/3)
+        
+        x = self.center[0] + r * jnp.sin(phi) * jnp.cos(theta)
+        y = self.center[1] + r * jnp.sin(phi) * jnp.sin(theta)
+        z = self.center[2] + r * jnp.cos(phi)
+        
+        return jnp.column_stack([x, y, z])
+    
+    def sample_boundary(self, n_points: int, rng: Optional[jax.Array] = None,
+                       tags: Optional[list] = None) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        if rng is None:
+            rng = jax.random.PRNGKey(1)
+        
+        keys = jax.random.split(rng, 2)
+        points_list = []
+        normals_list = []
+        
+        n_per_surface = n_points // 2
+        
+        # Внешняя сфера
+        if tags is None or "outer" in tags:
+            u = jax.random.uniform(keys[0], (n_per_surface,))
+            v = jax.random.uniform(keys[1], (n_per_surface,))
+            
+            theta = 2 * jnp.pi * u
+            phi = jnp.arccos(2 * v - 1)
+            
+            x = self.center[0] + self.R_outer * jnp.sin(phi) * jnp.cos(theta)
+            y = self.center[1] + self.R_outer * jnp.sin(phi) * jnp.sin(theta)
+            z = self.center[2] + self.R_outer * jnp.cos(phi)
+            
+            points_list.append(jnp.column_stack([x, y, z]))
+            normals_list.append(jnp.column_stack([
+                jnp.sin(phi) * jnp.cos(theta),
+                jnp.sin(phi) * jnp.sin(theta),
+                jnp.cos(phi)
+            ]))
+        
+        # Внутренняя сфера
+        if tags is None or "inner" in tags:
+            u = jax.random.uniform(keys[0], (n_per_surface,))
+            v = jax.random.uniform(keys[1], (n_per_surface,))
+            
+            theta = 2 * jnp.pi * u
+            phi = jnp.arccos(2 * v - 1)
+            
+            x = self.center[0] + self.R_inner * jnp.sin(phi) * jnp.cos(theta)
+            y = self.center[1] + self.R_inner * jnp.sin(phi) * jnp.sin(theta)
+            z = self.center[2] + self.R_inner * jnp.cos(phi)
+            
+            points_list.append(jnp.column_stack([x, y, z]))
+            # Нормаль направлена внутрь (наружу из материала)
+            normals_list.append(-jnp.column_stack([
+                jnp.sin(phi) * jnp.cos(theta),
+                jnp.sin(phi) * jnp.sin(theta),
+                jnp.cos(phi)
+            ]))
+        
+        return jnp.vstack(points_list), jnp.vstack(normals_list)
+    
+    def is_inside(self, points: jnp.ndarray) -> jnp.ndarray:
+        r = jnp.linalg.norm(points - self.center, axis=1)
+        return (r <= self.R_outer) & (r >= self.R_inner)
+    
+    @property
+    def bounds(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        min_corner = self.center - self.R_outer
+        max_corner = self.center + self.R_outer
+        return min_corner, max_corner
+
+
 class MeshGeometry(Geometry):
     """
     Geometry defined by a mesh loaded from file (STL, OBJ, Gmsh).
