@@ -109,8 +109,8 @@ def run_experiment(
     
     # Формирование результата
     result = {
-        'bc_left': float(metrics['bc_left']),
-        'bc_right': float(metrics['bc_right']),
+        'bc_left': metrics['bc_left'],
+        'bc_right': metrics['bc_right'],
         'training_time': f'{training_time:.4f}',
         'epochs_trained': len(history['steps']),
         'lr': config.lr,
