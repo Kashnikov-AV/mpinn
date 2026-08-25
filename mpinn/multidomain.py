@@ -52,11 +52,11 @@ def compute_interface_loss(
         cont_t = (t_l - t_r) ** 2
 
         # Evaluate gradients at interface using autograd
-        def eval_l(xv):
-            return m_l(jnp.array([[xv]])).ravel()[0]
+        def make_eval_fn(model):
+            return lambda xv: model(jnp.array([[xv]])).ravel()[0]
 
-        def eval_r(xv):
-            return m_r(jnp.array([[xv]])).ravel()[0]
+        eval_l = make_eval_fn(m_l)
+        eval_r = make_eval_fn(m_r)
 
         dt_l = jax.grad(eval_l)(x_int)
         dt_r = jax.grad(eval_r)(x_int)

@@ -292,7 +292,7 @@ def run_grid_search(
                 exact_fn=exact_fn,
             )
             results.append(result)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Ошибка в эксперименте {i}: {e}")
             continue
 
