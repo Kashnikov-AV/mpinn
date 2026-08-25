@@ -11,13 +11,19 @@ import jax.numpy as jnp
 @dataclass(frozen=True)
 class PhysicsParams:
     """Физические параметры задачи."""
-    x1:  float = None
-    x0: float = None
-    T0:  float = None
-    T1:   float = None
-    _lambda: float = None
-    h:       float = None
+    x0: float = 0.0
+    x1: float = 1.0
+    T0: float = None  # Температура на левой границе (Dirichlet)
+    T1: float = None  # Температура на правой границе (Dirichlet)
+    T_inf: float = None  # Температура окружающей среды (для Robin)
+    _lambda: float = 1.0  # Теплопроводность
+    h: float = 10.0  # Коэффициент теплоотдачи
     source_fn: Callable = None  # Функция источника тепла f(x), по умолчанию нет источника
+
+    def __post_init__(self):
+        # Установка значений по умолчанию
+        if self.T_inf is None:
+            object.__setattr__(self, 'T_inf', self.T1 if self.T1 is not None else 500.0)
 
     @property
     def alpha(self):
@@ -96,7 +102,7 @@ def get_optimizer(name: str, lr: float):
 DEFAULT_PHYSICS = {
     'x0': 0.0,
     'x1': 1.0,
-    'T_left': 300.0,
+    'T0': 300.0,
     'T_inf': 500.0,
     '_lambda': 1.0,
     'h': 10.0,

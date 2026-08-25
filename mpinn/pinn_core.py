@@ -32,6 +32,23 @@ class PINN:
         self.weights = weights
 
     def create_loss_fn(self, pde_fn, *bc_fns, phys):
+        """
+        Создает функцию потерь для обучения.
+        
+        Parameters:
+        -----------
+        pde_fn : callable
+            Функция PDE.
+        bc_fns : list
+            Список функций граничных условий.
+        phys : PhysicsParams
+            Физические параметры.
+            
+        Returns:
+        --------
+        callable
+            Функция потерь с атрибутами pde_fn, bc_fns, phys.
+        """
         pde_bound = partial(pde_fn, phys=phys)
         bc_bounds = list(bc_fns)
 
@@ -44,37 +61,66 @@ class PINN:
                 total += w * l_bc
                 
             return total, (loss_pde, *loss_bcs)
+        
+        # Сохраняем ссылки на исходные функции для train_step
+        total_loss.pde_fn = pde_fn
+        total_loss.bc_fns = bc_fns
+        total_loss.phys = phys
         return total_loss
 
-    @partial(jit, static_argnames=['self', 'graphdef', 'tx'])
-    def train_step(self, params, graphdef, x_collocation, tx, opt_state, loss_fn):
+    def train_step(self, x_collocation, pde_fn, bc_fns, phys):
+        """
+        Выполняет один шаг обучения.
+        
+        Parameters:
+        -----------
+        x_collocation : jax.Array
+            Точки коллокации формы (n_points, 1).
+        pde_fn : callable
+            Функция PDE.
+        bc_fns : list
+            Список функций граничных условий.
+        phys : PhysicsParams
+            Физические параметры.
+            
+        Returns:
+        --------
+        dict
+            Словарь с потерями: {'total_loss', 'pde', 'bc_0', 'bc_1'}.
+        """
+        # Создаем функцию потерь
+        loss_fn = self.create_loss_fn(pde_fn, *bc_fns, phys=phys)
+        
         def closure(p):
-            model = nnx.merge(graphdef, p)
+            model = nnx.merge(self.graphdef, p)
             return loss_fn(model, x_collocation)
             
-        (total_loss, aux_losses), grads = value_and_grad(closure, has_aux=True)(params)
-        updates, new_opt_state = tx.update(grads, opt_state)
-        new_params = optax.apply_updates(params, updates)
-        return new_params, new_opt_state, total_loss, aux_losses
+        (total_loss, aux_losses), grads = value_and_grad(closure, has_aux=True)(self.params)
+        updates, new_opt_state = self.tx.update(grads, self.opt_state)
+        self.params = optax.apply_updates(self.params, updates)
+        self.opt_state = new_opt_state
+        
+        loss_names = ['pde'] + [f'bc_{i}' for i in range(len(bc_fns))]
+        losses = {'total_loss': float(total_loss)}
+        for name, val in zip(loss_names, aux_losses):
+            losses[name] = float(val)
+        
+        return losses
 
     def train_loop(self, x_collocation, num_steps, loss_fn, loss_names, log_interval=100):
         history = {'steps': [], 'total_loss': []}
         for name in loss_names:
             history[name] = []
             
-        curr_params, curr_opt_state = self.params, self.opt_state
         for step in range(num_steps):
-            curr_params, curr_opt_state, total_loss, aux_losses = self.train_step(
-                curr_params, self.graphdef, x_collocation, self.tx, curr_opt_state, loss_fn)
+            losses = self.train_step(x_collocation, loss_fn.pde_fn, loss_fn.bc_fns, loss_fn.phys)
                 
             if step % log_interval == 0 or step == num_steps - 1:
                 history['steps'].append(step)
-                history['total_loss'].append(float(total_loss))
-                for name, val in zip(loss_names, aux_losses):
-                    history[name].append(float(val))
+                history['total_loss'].append(losses['total_loss'])
+                for name in loss_names:
+                    history[name].append(losses.get(name, losses['total_loss']))
                     
-        self.params = curr_params
-        self.opt_state = curr_opt_state
         return history
 
     def fit(self, x_collocation, pde_fn, bc_fns, phys, epochs):

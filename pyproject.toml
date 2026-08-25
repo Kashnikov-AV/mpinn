@@ -5,7 +5,7 @@ description = "Библиотека для решения задач стаци�
 authors = [
     {name = "Kashnikov-AV",email = "egkashnikov@gmail.com"}
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
 ]
 readme = "README.md"

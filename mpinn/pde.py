@@ -24,22 +24,22 @@ def line_1d(model, x, phys):
     float
         Средняя квадратичная невязка.
     """
-    # Векторизуем вычисление функции сети
     def predict(x_val):
         return model(jnp.atleast_2d(x_val)).ravel()[0]
     
-    # Создаём векторизованные версии первой и второй производных
-    grad_predict = jax.grad(predict)
-    hessian_predict = jax.grad(grad_predict)
+    # Первая производная
+    grad_T = jax.grad(predict)
     
-    # Применяем vmap для вычисления на всех точках одновременно
-    x_flat = x.ravel()
-    d2T_dx2 = jax.vmap(hessian_predict)(x_flat)
+    # Вторая производная через grad от первой производной
+    def grad_T_fn(x_val):
+        return grad_T(x_val)
+    
+    d2T_dx2 = jax.vmap(jax.grad(grad_T_fn))(x.ravel())
     
     # Вычисляем источник если задан
     source_val = 0.0
     if hasattr(phys, 'source_fn') and phys.source_fn is not None:
-        source_val = phys.source_fn(x_flat)
+        source_val = phys.source_fn(x.ravel())
     
     # Невязка: d2T/dx2 + f(x) = 0
     residual = d2T_dx2 + source_val
