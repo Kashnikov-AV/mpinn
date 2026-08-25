@@ -374,8 +374,8 @@ from geom import Interval
 class Physics:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0
-    T_right = 400.0
+    T0 = 300.0
+    T1 = 400.0
 
 phys = Physics()
 
@@ -394,8 +394,8 @@ geometry = Interval(phys.x0, phys.x1)
 x_collocation = geometry.generate_collocation(n_interior=100)
 
 # Граничные условия
-bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T0)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T1)
 
 # Обучение
 history, training_time = pinn.fit(

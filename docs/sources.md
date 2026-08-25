@@ -54,8 +54,8 @@ source_fn = constant_source(1000.0)
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=source_fn
 )
 ```
@@ -102,8 +102,8 @@ source_fn = gaussian_source(center=0.5, width=0.1, amplitude=5000.0)
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=source_fn
 )
 ```
@@ -152,8 +152,8 @@ source_fn = point_source(location=0.3, epsilon=0.01, amplitude=100.0)
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=source_fn
 )
 ```
@@ -199,8 +199,8 @@ source_fn = custom_source(sinusoidal_source)
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=source_fn
 )
 ```
@@ -228,8 +228,8 @@ from mpinn.sources import no_source
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=no_source()
 )
 
@@ -237,8 +237,8 @@ phys = PhysicsParams(
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0
+    T0=300.0,
+    T1=400.0
 )
 ```
 
@@ -262,8 +262,8 @@ import optax
 phys1 = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=constant_source(1000.0)  # 1000 Вт/м³
 )
 
@@ -272,8 +272,8 @@ phys1 = PhysicsParams(
 phys2 = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=gaussian_source(center=0.5, width=0.1, amplitude=5000.0)
 )
 
@@ -282,8 +282,8 @@ phys2 = PhysicsParams(
 phys3 = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=point_source(location=0.3, epsilon=0.01, amplitude=100.0)
 )
 
@@ -296,8 +296,8 @@ def polynomial_source(x):
 phys4 = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=custom_source(polynomial_source)
 )
 
@@ -328,8 +328,8 @@ pinn = PINN(net, opt=optimizer, weights=config.weights)
 geom = Interval(phys1.x0, phys1.x1)
 x_collocation = geom.generate_collocation(n_interior=config.num_points)
 
-bc_left = lambda m: dirichlet_bc(m, phys1.x0, phys1.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys1.x1, phys1.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys1.x0, phys1.T0)
+bc_right = lambda m: dirichlet_bc(m, phys1.x1, phys1.T1)
 
 history, training_time = pinn.fit(
     x_collocation=x_collocation,

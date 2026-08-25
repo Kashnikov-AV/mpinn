@@ -120,8 +120,8 @@ from mpinn.geom import Interval
 class Physics:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0  # K
-    T_right = 400.0  # K
+    T0 = 300.0  # K
+    T1 = 400.0  # K
 
 phys = Physics()
 
@@ -144,8 +144,8 @@ geometry = Interval(phys.x0, phys.x1)
 x_collocation = geometry.generate_collocation(n_interior=100)
 
 # Граничные условия
-bc_left = lambda model: dirichlet_bc(model, x=phys.x0, T=phys.T_left)
-bc_right = lambda model: dirichlet_bc(model, x=phys.x1, T=phys.T_right)
+bc_left = lambda model: dirichlet_bc(model, x=phys.x0, T=phys.T0)
+bc_right = lambda model: dirichlet_bc(model, x=phys.x1, T=phys.T1)
 
 # Обучение
 history, training_time = pinn.fit(
@@ -182,8 +182,8 @@ source_fn = sources.gaussian_source(center=0.5, width=0.1, amplitude=100.0)
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0,
+    T0=300.0,
+    T1=400.0,
     source_fn=source_fn  # Добавляем источник
 )
 
@@ -214,8 +214,8 @@ phys = PhysicsParams(
     x1=0.2,
     interfaces=[0.1],           # Один интерфейс между слоями
     all_lambdas=[1.0, 0.5],     # Теплопроводности слоёв
-    T_left=300.0,               # Температура на левой границе
-    T_right=400.0               # Температура на правой границе
+    T0=300.0,               # Температура на левой границе
+    T1=400.0               # Температура на правой границе
 )
 
 # Создаём по одной сети на каждый домен (2 сети для 2 слоёв)
@@ -237,8 +237,8 @@ mpinn = MPINN(
 # Обучение
 history, training_time = mpinn.fit(
     pde_fn=line_1d,
-    bc_left_fn=lambda m: dirichlet_bc(m, x=phys.x0, T=phys.T_left),
-    bc_right_fn=lambda m: dirichlet_bc(m, x=phys.x1, T=phys.T_right),
+    bc_left_fn=lambda m: dirichlet_bc(m, x=phys.x0, T=phys.T0),
+    bc_right_fn=lambda m: dirichlet_bc(m, x=phys.x1, T=phys.T1),
     phys=phys,
     epochs=10000
 )
@@ -267,8 +267,8 @@ phys = PhysicsParams(
     x1=0.3,
     interfaces=[0.1, 0.2],        # Два интерфейса (границы между слоями)
     all_lambdas=[1.0, 0.5, 2.0],  # Теплопроводности трёх слоёв
-    T_left=300.0,
-    T_right=400.0
+    T0=300.0,
+    T1=400.0
 )
 
 # Создаём по одной сети на каждый домен (3 сети для 3 слоёв)
@@ -288,8 +288,8 @@ mpinn = MPINN(
 )
 
 # Граничные условия
-bc_left = lambda model: dirichlet_bc(model, x=phys.x0, T=phys.T_left)
-bc_right = lambda model: dirichlet_bc(model, x=phys.x1, T=phys.T_right)
+bc_left = lambda model: dirichlet_bc(model, x=phys.x0, T=phys.T0)
+bc_right = lambda model: dirichlet_bc(model, x=phys.x1, T=phys.T1)
 
 # Обучение
 history, training_time = mpinn.fit(
@@ -346,7 +346,7 @@ from mpinn.runner import run_experiment
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
+    T0=300.0,
     T_inf=500.0,
     _lambda=1.0,
     h=10.0
@@ -500,7 +500,7 @@ MPINN обеспечивает два условия сопряжения на �
 
 1. **Непрерывность температуры:**
    ```
-   L_interface_T = (T_left(x_int) - T_right(x_int))²
+   L_interface_T = (T0(x_int) - T1(x_int))²
    ```
 
 2. **Непрерывность теплового потока:**
@@ -547,7 +547,7 @@ compute_interface_loss(models, interfaces, all_lambdas)
 
 - **`PhysicsParams`** — физические параметры задачи:
   - `x0`, `x1` — границы области
-  - `T_left`, `T_right` — температуры на границах
+  - `T0`, `T1` — температуры на границах
   - `_lambda` — теплопроводность
   - `h` — коэффициент конвекции
   - `T_inf` — температура окружающей среды
@@ -704,7 +704,7 @@ from mpinn.config import PhysicsParams
 class PhysicsNeuman:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0
+    T0 = 300.0
     grad_right = 100.0  # K/м
 
 phys = PhysicsNeuman()
@@ -720,7 +720,7 @@ from mpinn.config import PhysicsParams
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
+    T0=300.0,
     h=10.0,          # Вт/(м²·K)
     _lambda=1.0,     # Вт/(м·K)
     T_inf=500.0      # K
@@ -750,8 +750,8 @@ phys = PhysicsParams(
     x1=0.3,
     interfaces=[0.1, 0.2],        # Границы между слоями
     all_lambdas=[1.0, 0.5, 2.0],  # Теплопроводности слоёв
-    T_left=300.0,
-    T_right=400.0
+    T0=300.0,
+    T1=400.0
 )
 
 # Создаём по одной сети на каждый домен
@@ -787,7 +787,7 @@ param_grid = {
 }
 
 base_config = TrainConfig()
-phys = PhysicsParams(x0=0.0, x1=1.0, T_left=300.0, T_right=400.0)
+phys = PhysicsParams(x0=0.0, x1=1.0, T0=300.0, T1=400.0)
 
 df_results = run_grid_search(
     param_grid=param_grid,

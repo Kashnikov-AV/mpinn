@@ -42,8 +42,8 @@ MPINN(nets, opt, weights, phys, n_collocation=100, rng=None)
 | `x1` | float | Правая граница области |
 | `interfaces` | list[float] | Координаты границ между слоями |
 | `all_lambdas` | list[float] | Теплопроводности каждого слоя |
-| `T_left` | float | Температура на левой границе |
-| `T_right` | float | Температура на правой границе (для Dirichlet) |
+| `T0` | float | Температура на левой границе |
+| `T1` | float | Температура на правой границе (для Dirichlet) |
 
 **Атрибуты экземпляра:**
 
@@ -70,7 +70,7 @@ create_loss_fn(pde_fn, bc_left_fn, bc_right_fn, phys)
 1. **PDE losses** — невязка уравнения в каждом домене
 2. **Boundary conditions** — условия на внешних границах
 3. **Interface conditions** — условия сопряжения на границах слоёв:
-   - Непрерывность температуры: `T_left = T_right`
+   - Непрерывность температуры: `T0 = T1`
    - Непрерывность теплового потока: `λ_left·dT/dx0 = λ_right·dT/dx1`
 
 **Параметры:**
@@ -271,8 +271,8 @@ class PhysicsMulti:
     all_lambdas = [1.0, 0.5]  # Вт/(м·K)
     
     # Граничные условия
-    T_left = 300.0  # K
-    T_right = 400.0 # K
+    T0 = 300.0  # K
+    T1 = 400.0 # K
 
 phys = PhysicsMulti()
 
@@ -297,8 +297,8 @@ mpinn = MPINN(
 )
 
 # Граничные условия
-bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T0)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T1)
 
 # Обучение
 history, training_time = mpinn.fit(
@@ -331,8 +331,8 @@ class PhysicsThreeLayers:
     interfaces = [0.1, 0.2]  # Две границы раздела
     
     all_lambdas = [1.0, 0.5, 2.0]  # Три слоя
-    T_left = 300.0
-    T_right = 400.0
+    T0 = 300.0
+    T1 = 400.0
 
 phys = PhysicsThreeLayers()
 
@@ -393,7 +393,7 @@ weights = [
 ### 1. Непрерывность температуры
 
 ```
-T_left(x_interface) = T_right(x_interface)
+T0(x_interface) = T1(x_interface)
 ```
 
 ### 2. Непрерывность теплового потока

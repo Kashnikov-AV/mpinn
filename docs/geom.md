@@ -365,8 +365,8 @@ from geom import Interval
 class Physics:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0
-    T_right = 400.0
+    T0 = 300.0
+    T1 = 400.0
 
 phys = Physics()
 
@@ -383,8 +383,8 @@ print(f"Форма точек коллокации: {x_collocation.shape}")
 net = FCNet(1, 50, 1, 4, nnx.tanh, nnx.Rngs(0))
 pinn = PINN(net, optax.adam(1e-3), weights=[1.0, 1.0, 1.0])
 
-bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T0)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T1)
 
 history, time = pinn.fit(
     x_collocation=x_collocation,

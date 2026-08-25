@@ -215,20 +215,20 @@ import optax
 class PhysicsLine:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0
-    T_right = 400.0
+    T0 = 300.0
+    T1 = 400.0
 
 class PhysicsCylinder:
     x0 = 0.1   # внутренний радиус
     x1 = 0.5  # внешний радиус
-    T_left = 300.0
-    T_right = 400.0
+    T0 = 300.0
+    T1 = 400.0
 
 class PhysicsSphere:
     x0 = 0.1
     x1 = 0.5
-    T_left = 300.0
-    T_right = 400.0
+    T0 = 300.0
+    T1 = 400.0
 
 # Выбор геометрии и соответствующего PDE
 geometry_type = "cylinder"  # "line", "cylinder", или "sphere"
@@ -250,8 +250,8 @@ pinn = PINN(net, optax.adam(1e-3), weights=[1.0, 1.0, 1.0])
 geom = Interval(phys.x0, phys.x1)
 x_collocation = geom.generate_collocation(n_interior=100)
 
-bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T0)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T1)
 
 history, time = pinn.fit(
     x_collocation=x_collocation,

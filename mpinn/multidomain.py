@@ -30,7 +30,7 @@ def compute_interface_loss(
     Compute interface losses between adjacent domains.
     
     Enforces continuity of solution and flux at domain interfaces:
-    - Continuity of T: (T0 - T1)^2
+    - Continuity of T: (T0 - T1)^T1
     - Continuity of flux: (lambda_left * dT/dx|left - lambda_right * dT/dx|right)^2
     
     Args:

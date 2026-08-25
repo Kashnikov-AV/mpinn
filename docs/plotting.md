@@ -175,8 +175,8 @@ import optax
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
-    T_right=400.0
+    T0=300.0,
+    T1=400.0
 )
 
 config = TrainConfig(
@@ -207,8 +207,8 @@ geom = Interval(phys.x0, phys.x1)
 x_collocation = geom.generate_collocation(n_interior=config.num_points)
 
 # 4. Граничные условия
-bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T0)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T1)
 
 # 5. Обучение
 history, training_time = pinn.fit(

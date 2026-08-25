@@ -2,7 +2,7 @@ import jax.numpy as jnp
 
 def line_1d_dirichlet_exact(x, phys):
     x0, x1 = phys.x0, phys.x1
-    T0, T1 = phys.T0, phys.T1
+    T0, T1 = phys.T0, phys.T1T1
     return T0 + (T1 - T0) * (x - x0) / (x1 - x0)
 
 def line_1d_neuman_exact(x, phys):
@@ -29,7 +29,7 @@ def line_1d_robin_exact(x, phys):
 
 def cylinder_1d_dirichlet_exact(x, phys):
     r0, r1 = phys.x0, phys.x1
-    T0, T1 = phys.T0, phys.T1
+    T0, T1 = phys.T0, phys.T1T1
     ln_r0 = jnp.log(r0)
     ln_r1 = jnp.log(r1)
     return T0 + (T1 - T0) * (jnp.log(x) - ln_r0) / (ln_r1 - ln_r0)
@@ -59,7 +59,7 @@ def cylinder_1d_robin_exact(x, phys):
 
 def sphere_1d_dirichlet_exact(x, phys):
     r0, r1 = phys.x0, phys.x1
-    T0, T1 = phys.T0, phys.T1
+    T0, T1 = phys.T0, phys.T1T1
     inv_r0 = 1.0 / r0
     inv_r1 = 1.0 / r1
     inv_x = 1.0 / x

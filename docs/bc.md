@@ -217,7 +217,7 @@ pinn = PINN(net, optimizer, weights=[1.0, 1.0, 1.0])
 x0 = jnp.linspace(phys.x0, phys.x0 + 0.01, 5)
 x1 = jnp.linspace(phys.x1 - 0.01, phys.x1, 5)
 
-bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T_left)
+bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T0)
 bc_right = lambda m: neuman_bc(m, x=x1, g=phys.grad_right)
 
 # Обучение
@@ -242,8 +242,8 @@ import jax.numpy as jnp
 class Physics:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0
-    T_right = 400.0
+    T0 = 300.0
+    T1 = 400.0
 
 phys = Physics()
 
@@ -251,8 +251,8 @@ phys = Physics()
 x0 = jnp.linspace(phys.x0, phys.x0 + 0.01, 5)
 x1 = jnp.linspace(phys.x1 - 0.01, phys.x1, 5)
 
-bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, x=x1, T=phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T0)
+bc_right = lambda m: dirichlet_bc(m, x=x1, T=phys.T1)
 
 pinn.fit(..., bc_fns=[bc_left, bc_right], ...)
 ```
@@ -263,7 +263,7 @@ pinn.fit(..., bc_fns=[bc_left, bc_right], ...)
 class Physics:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0
+    T0 = 300.0
     grad_right = 0.0  # Теплоизолированная граница
 
 phys = Physics()
@@ -271,7 +271,7 @@ phys = Physics()
 x0 = jnp.linspace(phys.x0, phys.x0 + 0.01, 5)
 x1 = jnp.linspace(phys.x1 - 0.01, phys.x1, 5)
 
-bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T_left)
+bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T0)
 bc_right = lambda m: neuman_bc(m, x=x1, g=phys.grad_right)
 
 pinn.fit(..., bc_fns=[bc_left, bc_right], ...)
@@ -283,7 +283,7 @@ pinn.fit(..., bc_fns=[bc_left, bc_right], ...)
 class Physics:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0
+    T0 = 300.0
     h_conv = 10.0       # Вт/(м²·K)
     _lambda = 1.0       # Вт/(м·K)
     T_inf = 500.0       # K
@@ -293,7 +293,7 @@ phys = Physics()
 x0 = jnp.linspace(phys.x0, phys.x0 + 0.01, 5)
 x1 = jnp.linspace(phys.x1 - 0.01, phys.x1, 5)
 
-bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T_left)
+bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T0)
 bc_right = lambda m: robin_bc(
     m, 
     x=x1,

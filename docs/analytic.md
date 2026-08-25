@@ -57,7 +57,7 @@ line_1d_dirichlet_exact(x, phys)
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `x` | jax.Array/float | Координаты |
-| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T_left`, `T_right` |
+| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T0`, `T1` |
 
 **Возвращает:**
 
@@ -72,7 +72,7 @@ line_1d_dirichlet_exact(x, phys)
 **Уравнение:**
 
 ```
-T(x) = T_left + grad_right · (x - x0)
+T(x) = T0 + grad_right · (x - x0)
 ```
 
 **Сигнатура:**
@@ -86,7 +86,7 @@ line_1d_neuman_exact(x, phys)
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `x` | jax.Array/float | Координаты |
-| `phys` | object | Объект с атрибутами: `x0`, `T_left`, `grad_right` |
+| `phys` | object | Объект с атрибутами: `x0`, `T0`, `grad_right` |
 
 ---
 
@@ -97,8 +97,8 @@ line_1d_neuman_exact(x, phys)
 **Уравнение:**
 
 ```
-A = h · (T_inf - T_left) / (h · (x₁ - x₀) + λ)
-B = T_left - A · x₀
+A = h · (T_inf - T0) / (h · (x₁ - x₀) + λ)
+B = T0 - A · x₀
 T(x) = A · x + B
 ```
 
@@ -113,7 +113,7 @@ line_1d_robin_exact(x, phys)
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `x` | jax.Array/float | Координаты |
-| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T_left`, `h`, `_lambda`, `T_inf` |
+| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T0`, `h`, `_lambda`, `T_inf` |
 
 ---
 
@@ -140,7 +140,7 @@ cylinder_1d_dirichlet_exact(x, phys)
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `x` | jax.Array/float | Радиальные координаты |
-| `phys` | object | Объект с атрибутами: `x0` (r₀), `x1` (r₁), `T_left`, `T_right` |
+| `phys` | object | Объект с атрибутами: `x0` (r₀), `x1` (r₁), `T0`, `T1` |
 
 ---
 
@@ -152,7 +152,7 @@ cylinder_1d_dirichlet_exact(x, phys)
 
 ```
 C = grad_right · r₁
-T(r) = T_left + C · (ln(r) - ln(r₀))
+T(r) = T0 + C · (ln(r) - ln(r₀))
 ```
 
 **Сигнатура:**
@@ -166,7 +166,7 @@ cylinder_1d_neuman_exact(x, phys)
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `x` | jax.Array/float | Радиальные координаты |
-| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T_left`, `grad_right` |
+| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T0`, `grad_right` |
 
 ---
 
@@ -177,8 +177,8 @@ cylinder_1d_neuman_exact(x, phys)
 **Уравнение:**
 
 ```
-C₁ = h · r₁ · (T_inf - T_left) / (λ + h · r₁ · ln(r₁/r₀))
-T(r) = T_left + C₁ · ln(r/r₀)
+C₁ = h · r₁ · (T_inf - T0) / (λ + h · r₁ · ln(r₁/r₀))
+T(r) = T0 + C₁ · ln(r/r₀)
 ```
 
 **Сигнатура:**
@@ -192,7 +192,7 @@ cylinder_1d_robin_exact(x, phys)
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `x` | jax.Array/float | Радиальные координаты |
-| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T_left`, `h`, `_lambda`, `T_inf` |
+| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T0`, `h`, `_lambda`, `T_inf` |
 
 ---
 
@@ -219,7 +219,7 @@ sphere_1d_dirichlet_exact(x, phys)
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `x` | jax.Array/float | Радиальные координаты |
-| `phys` | object | Объект с атрибутами: `x0` (r₀), `x1` (r₁), `T_left`, `T_right` |
+| `phys` | object | Объект с атрибутами: `x0` (r₀), `x1` (r₁), `T0`, `T1` |
 
 ---
 
@@ -230,7 +230,7 @@ sphere_1d_dirichlet_exact(x, phys)
 **Уравнение:**
 
 ```
-T(r) = T_left - grad_right · r₁² · (1/r - 1/r₀)
+T(r) = T0 - grad_right · r₁² · (1/r - 1/r₀)
 ```
 
 **Сигнатура:**
@@ -244,7 +244,7 @@ sphere_1d_neuman_exact(x, phys)
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `x` | jax.Array/float | Радиальные координаты |
-| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T_left`, `grad_right` |
+| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T0`, `grad_right` |
 
 ---
 
@@ -255,8 +255,8 @@ sphere_1d_neuman_exact(x, phys)
 **Уравнение:**
 
 ```
-C₁ = h · (T_inf - T_left) / (λ/r₁² + h · (1/r₀ - 1/r₁))
-T(r) = T_left + C₁ · (1/r₀ - 1/r)
+C₁ = h · (T_inf - T0) / (λ/r₁² + h · (1/r₀ - 1/r₁))
+T(r) = T0 + C₁ · (1/r₀ - 1/r)
 ```
 
 **Сигнатура:**
@@ -270,7 +270,7 @@ sphere_1d_robin_exact(x, phys)
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `x` | jax.Array/float | Радиальные координаты |
-| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T_left`, `h`, `_lambda`, `T_inf` |
+| `phys` | object | Объект с атрибутами: `x0`, `x1`, `T0`, `h`, `_lambda`, `T_inf` |
 
 ---
 
@@ -318,8 +318,8 @@ pinn.save_plot(x_test, T_pred, T_exact, phys, "comparison.png")
 class Physics:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0  # K
-    T_right = 400.0 # K
+    T0 = 300.0  # K
+    T1 = 400.0 # K
 
 exact_fn = line_1d_dirichlet_exact
 ```
@@ -330,7 +330,7 @@ exact_fn = line_1d_dirichlet_exact
 class Physics:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0      # K
+    T0 = 300.0      # K
     grad_right = 100.0  # K/м
 
 exact_fn = line_1d_neuman_exact
@@ -342,7 +342,7 @@ exact_fn = line_1d_neuman_exact
 class Physics:
     x0 = 0.0
     x1 = 1.0
-    T_left = 300.0      # K
+    T0 = 300.0      # K
     h = 10.0            # Вт/(м²·K)
     _lambda = 1.0       # Вт/(м·K)
     T_inf = 500.0       # K
@@ -356,8 +356,8 @@ exact_fn = line_1d_robin_exact
 class Physics:
     x0 = 0.1    # м (внутренний радиус)
     x1 = 0.5   # м (внешний радиус)
-    T_left = 300.0  # K
-    T_right = 400.0 # K
+    T0 = 300.0  # K
+    T1 = 400.0 # K
 
 exact_fn = cylinder_1d_dirichlet_exact
 ```
@@ -368,8 +368,8 @@ exact_fn = cylinder_1d_dirichlet_exact
 class Physics:
     x0 = 0.1    # м (внутренний радиус)
     x1 = 0.5   # м (внешний радиус)
-    T_left = 300.0  # K
-    T_right = 400.0 # K
+    T0 = 300.0  # K
+    T1 = 400.0 # K
 
 exact_fn = sphere_1d_dirichlet_exact
 ```

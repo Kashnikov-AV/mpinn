@@ -25,7 +25,7 @@
 |---------|-----|----------|----------------------|
 | `x0` | float | Левая граница области, м | None |
 | `x1` | float | Правая граница области, м | None |
-| `T_left` | float | Температура на левой границе, К | None |
+| `T0` | float | Температура на левой границе, К | None |
 | `T_inf` | float | Температура окружающей среды, К | None |
 | `_lambda` | float | Теплопроводность, Вт/(м·К) | None |
 | `h` | float | Коэффициент теплоотдачи, Вт/(м²·К) | None |
@@ -72,7 +72,7 @@ from mpinn.config import PhysicsParams
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
+    T0=300.0,
     T_inf=500.0,
     _lambda=1.0,
     h=10.0
@@ -211,7 +211,7 @@ rmsprop_opt = get_optimizer('rmsprop', lr=0.005)
 DEFAULT_PHYSICS = {
     'x0': 0.0,
     'x1': 1.0,
-    'T_left': 300.0,
+    'T0': 300.0,
     'T_inf': 500.0,
     '_lambda': 1.0,
     'h': 10.0,
@@ -251,7 +251,7 @@ import flax.nnx as nnx
 phys = PhysicsParams(
     x0=0.0,
     x1=1.0,
-    T_left=300.0,
+    T0=300.0,
     T_inf=500.0,
     _lambda=1.0,
     h=10.0
