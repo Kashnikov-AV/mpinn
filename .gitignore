@@ -1,5 +1,17 @@
+```
+# Python
+__pycache__/
 *.pyc
-*.gz
-*.whl
-*.pyc
-.vscode/settings.json
+*.pyo
+*.pyd
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+.env
+```
