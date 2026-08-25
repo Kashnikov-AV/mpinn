@@ -100,7 +100,7 @@ class MPINN:
             weight_strategy: Strategy for loss weighting (default: FixedWeightStrategy)
             rng: JAX random key
         """
-        self.boundaries = (phys.x_left,) + tuple(phys.interfaces) + (phys.x_right,)
+        self.boundaries = (phys.x0,) + tuple(phys.interfaces) + (phys.x1,)
         self.n_domains = len(phys.all_lambdas)
         self.interfaces = tuple(phys.interfaces)
         self.all_lambdas = phys.all_lambdas

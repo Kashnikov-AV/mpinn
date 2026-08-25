@@ -20,17 +20,17 @@ class PhysicsParams:
     source_fn: Callable = None  # Функция источника тепла f(x), по умолчанию нет источника
 
     @property
-    def alpha_right(self):
+    def alpha(self):
         """Коэффициент при T в условии Робина: α = h"""
         return self.h
 
     @property
-    def beta_right(self):
+    def beta(self):
         """Коэффициент при dT/dx в условии Робина: β = λ"""
         return self._lambda
 
     @property
-    def gamma_right(self):
+    def gamma(self):
         """Свободный член в условии Робина: γ = h · T_inf"""
         return self.h * self.T_inf
 
@@ -94,8 +94,8 @@ def get_optimizer(name: str, lr: float):
 
 # Параметры по умолчанию
 DEFAULT_PHYSICS = {
-    'x_left': 0.0,
-    'x_right': 1.0,
+    'x0': 0.0,
+    'x1': 1.0,
     'T_left': 300.0,
     'T_inf': 500.0,
     '_lambda': 1.0,

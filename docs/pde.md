@@ -213,20 +213,20 @@ import optax
 
 # Физические параметры для разных геометрий
 class PhysicsLine:
-    x_left = 0.0
-    x_right = 1.0
+    x0 = 0.0
+    x1 = 1.0
     T_left = 300.0
     T_right = 400.0
 
 class PhysicsCylinder:
-    x_left = 0.1   # внутренний радиус
-    x_right = 0.5  # внешний радиус
+    x0 = 0.1   # внутренний радиус
+    x1 = 0.5  # внешний радиус
     T_left = 300.0
     T_right = 400.0
 
 class PhysicsSphere:
-    x_left = 0.1
-    x_right = 0.5
+    x0 = 0.1
+    x1 = 0.5
     T_left = 300.0
     T_right = 400.0
 
@@ -247,11 +247,11 @@ else:
 net = FCNet(1, 50, 1, 4, nnx.tanh, nnx.Rngs(0))
 pinn = PINN(net, optax.adam(1e-3), weights=[1.0, 1.0, 1.0])
 
-geom = Interval(phys.x_left, phys.x_right)
+geom = Interval(phys.x0, phys.x1)
 x_collocation = geom.generate_collocation(n_interior=100)
 
-bc_left = lambda m: dirichlet_bc(m, phys.x_left, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x_right, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
 
 history, time = pinn.fit(
     x_collocation=x_collocation,

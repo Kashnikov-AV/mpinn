@@ -1,16 +1,16 @@
 import jax.numpy as jnp
 
 def line_1d_dirichlet_exact(x, phys):
-    x0, x1 = phys.x_left, phys.x_right
+    x0, x1 = phys.x0, phys.x1
     T0, T1 = phys.T_left, phys.T_right
     return T0 + (T1 - T0) * (x - x0) / (x1 - x0)
 
 def line_1d_neuman_exact(x, phys):
-    return phys.T_left + phys.grad_right * (x - phys.x_left)
+    return phys.T_left + phys.grad_right * (x - phys.x0)
 
 def line_1d_robin_exact(x, phys):
-    x0 = phys.x_left
-    x1 = phys.x_right
+    x0 = phys.x0
+    x1 = phys.x1
 
     h = phys.h
     _lambda = phys._lambda
@@ -28,22 +28,22 @@ def line_1d_robin_exact(x, phys):
     return A * x + B
 
 def cylinder_1d_dirichlet_exact(x, phys):
-    r0, r1 = phys.x_left, phys.x_right
+    r0, r1 = phys.x0, phys.x1
     T0, T1 = phys.T_left, phys.T_right
     ln_r0 = jnp.log(r0)
     ln_r1 = jnp.log(r1)
     return T0 + (T1 - T0) * (jnp.log(x) - ln_r0) / (ln_r1 - ln_r0)
 
 def cylinder_1d_neuman_exact(x, phys):
-    r0, r1 = phys.x_left, phys.x_right
+    r0, r1 = phys.x0, phys.x1
     # Константа интегрирования: для цилиндра dT/dr = C/r
     # Из условия Неймана: C = grad_right * r1
     C = phys.grad_right * r1
     return phys.T_left + C * (jnp.log(x) - jnp.log(r0))
 
 def cylinder_1d_robin_exact(x, phys):
-    r0 = phys.x_left
-    r1 = phys.x_right
+    r0 = phys.x0
+    r1 = phys.x1
 
     h = phys.h
     _lambda = phys._lambda
@@ -58,7 +58,7 @@ def cylinder_1d_robin_exact(x, phys):
     return T_left + C1 * jnp.log(x / r0)
 
 def sphere_1d_dirichlet_exact(x, phys):
-    r0, r1 = phys.x_left, phys.x_right
+    r0, r1 = phys.x0, phys.x1
     T0, T1 = phys.T_left, phys.T_right
     inv_r0 = 1.0 / r0
     inv_r1 = 1.0 / r1
@@ -66,13 +66,13 @@ def sphere_1d_dirichlet_exact(x, phys):
     return T0 + (T1 - T0) * (inv_r0 - inv_x) / (inv_r0 - inv_r1)
 
 def sphere_1d_neuman_exact(x, phys):
-    r0 = phys.x_left
-    r1 = phys.x_right
+    r0 = phys.x0
+    r1 = phys.x1
     return phys.T_left - phys.grad_right * r1**2 * (1.0 / x - 1.0 / r0)
 
 def sphere_1d_robin_exact(x, phys):
-    r0 = phys.x_left
-    r1 = phys.x_right
+    r0 = phys.x0
+    r1 = phys.x1
 
     h = phys.h
     _lambda = phys._lambda

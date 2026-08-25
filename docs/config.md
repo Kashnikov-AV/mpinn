@@ -23,8 +23,8 @@
 
 | Атрибут | Тип | Описание | Значение по умолчанию |
 |---------|-----|----------|----------------------|
-| `x_left` | float | Левая граница области, м | None |
-| `x_right` | float | Правая граница области, м | None |
+| `x0` | float | Левая граница области, м | None |
+| `x1` | float | Правая граница области, м | None |
 | `T_left` | float | Температура на левой границе, К | None |
 | `T_inf` | float | Температура окружающей среды, К | None |
 | `_lambda` | float | Теплопроводность, Вт/(м·К) | None |
@@ -43,21 +43,21 @@ def alpha_right(self):
 
 Коэффициент при T в условии Робина: α = h
 
-##### beta_right
+##### beta
 
 ```python
 @property
-def beta_right(self):
+def beta(self):
     return self._lambda
 ```
 
 Коэффициент при dT/dx в условии Робина: β = λ
 
-##### gamma_right
+##### beta
 
 ```python
 @property
-def gamma_right(self):
+def beta(self):
     return self.h * self.T_inf
 ```
 
@@ -70,8 +70,8 @@ from mpinn.config import PhysicsParams
 
 # Создание объекта с параметрами по умолчанию
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_inf=500.0,
     _lambda=1.0,
@@ -80,8 +80,8 @@ phys = PhysicsParams(
 
 # Доступ к свойствам условия Робина
 alpha = phys.alpha_right   # 10.0
-beta = phys.beta_right     # 1.0
-gamma = phys.gamma_right   # 5000.0
+beta = phys.beta     # 1.0
+gamma = phys.gamma   # 5000.0
 ```
 
 ---
@@ -209,8 +209,8 @@ rmsprop_opt = get_optimizer('rmsprop', lr=0.005)
 
 ```python
 DEFAULT_PHYSICS = {
-    'x_left': 0.0,
-    'x_right': 1.0,
+    'x0': 0.0,
+    'x1': 1.0,
     'T_left': 300.0,
     'T_inf': 500.0,
     '_lambda': 1.0,
@@ -249,8 +249,8 @@ import flax.nnx as nnx
 
 # 1. Физические параметры
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_inf=500.0,
     _lambda=1.0,
@@ -286,12 +286,12 @@ net = FCNet(
 pinn = PINN(net, opt=optimizer, weights=config.weights)
 
 # 4. Геометрия и точки коллокации
-geom = Interval(phys.x_left, phys.x_right)
+geom = Interval(phys.x0, phys.x1)
 x_collocation = geom.generate_collocation(n_interior=config.num_points)
 
 print(f"Точки коллокации: {x_collocation.shape}")
-print(f"Границы: [{phys.x_left}, {phys.x_right}]")
-print(f"Условие Робина: α={phys.alpha_right}, β={phys.beta_right}, γ={phys.gamma_right}")
+print(f"Границы: [{phys.x0}, {phys.x1}]")
+print(f"Условие Робина: α={phys.alpha_right}, β={phys.beta}, γ={phys.gamma}")
 ```
 
 ---

@@ -145,7 +145,7 @@ show_history(history, save_path='results/training_history.png', show_plot=True)
   - Y: "T, К"
 - **Легенда**: расположена в лучшем месте (`loc='best'`), размер шрифта 14
 - **Сетка**: включена с прозрачностью 0.3
-- **Границы**: устанавливаются по физическим параметрам (`phys.x_left`, `phys.x_right`)
+- **Границы**: устанавливаются по физическим параметрам (`phys.x0`, `phys.x1`)
 
 ### График истории (show_history)
 
@@ -173,8 +173,8 @@ import optax
 
 # 1. Настройка
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0
 )
@@ -203,12 +203,12 @@ optimizer = optax.adam(config.lr)
 pinn = PINN(net, opt=optimizer, weights=config.weights)
 
 # 3. Геометрия и точки коллокации
-geom = Interval(phys.x_left, phys.x_right)
+geom = Interval(phys.x0, phys.x1)
 x_collocation = geom.generate_collocation(n_interior=config.num_points)
 
 # 4. Граничные условия
-bc_left = lambda m: dirichlet_bc(m, phys.x_left, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x_right, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
 
 # 5. Обучение
 history, training_time = pinn.fit(
@@ -220,7 +220,7 @@ history, training_time = pinn.fit(
 )
 
 # 6. Предсказание и оценка
-x_test = jnp.linspace(phys.x_left, phys.x_right, 100)
+x_test = jnp.linspace(phys.x0, phys.x1, 100)
 T_pred = pinn.predict(x_test)
 T_exact = line_1d_dirichlet_exact(x_test, phys)
 
@@ -261,7 +261,7 @@ mpinn = MPINN(nets, opt, phys, n_collocation=100)
 history, _ = mpinn.fit(pde_fn, bc_left_fn, bc_right_fn, phys, epochs=5000)
 
 # Предсказание
-x_test = jnp.linspace(phys.x_left, phys.x_right, 200)
+x_test = jnp.linspace(phys.x0, phys.x1, 200)
 T_pred = mpinn.predict(x_test)
 T_exact = exact_fn(x_test, phys)
 

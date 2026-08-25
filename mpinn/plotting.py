@@ -33,7 +33,7 @@ def show_plot(x_test, T_pred, T_exact, phys, title="Сравнение PINN и �
     plt.grid(True, alpha=0.3)
     
     # Установка границ
-    plt.xlim(phys.x_left, phys.x_right)
+    plt.xlim(phys.x0, phys.x1)
     
     plt.tight_layout()
     plt.show()
@@ -66,7 +66,7 @@ def save_plot(x_test, T_pred, T_exact, phys, save_path, title="Сравнени�
     plt.grid(True, alpha=0.3)
     
     # Установка границ
-    plt.xlim(phys.x_left, phys.x_right)
+    plt.xlim(phys.x0, phys.x1)
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=72, bbox_inches='tight')

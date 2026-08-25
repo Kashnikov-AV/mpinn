@@ -239,8 +239,8 @@ from mpinn.weight_strategies import FixedWeightStrategy
 
 # 1. Физические параметры для двух доменов
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=2.0,
+    x0=0.0,
+    x1=2.0,
     T_left=300.0,
     T_right=400.0,
     _lambda=1.0,
@@ -289,8 +289,8 @@ mpinn = MPINN(
 from mpinn.pde import line_1d
 from mpinn.bc import dirichlet_bc
 
-bc_left_fn = lambda m: dirichlet_bc(m, jnp.array([[phys.x_left]]), phys.T_left)
-bc_right_fn = lambda m: dirichlet_bc(m, jnp.array([[phys.x_right]]), phys.T_right)
+bc_left_fn = lambda m: dirichlet_bc(m, jnp.array([[phys.x0]]), phys.T_left)
+bc_right_fn = lambda m: dirichlet_bc(m, jnp.array([[phys.x1]]), phys.T_right)
 
 history, training_time = mpinn.fit(
     pde_fn=line_1d,

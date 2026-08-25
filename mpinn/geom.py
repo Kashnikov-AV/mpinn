@@ -87,10 +87,10 @@ class Geometry(ABC):
 
 class Interval(Geometry):
 
-    def __init__(self, x_left, x_right):
+    def __init__(self, x0, x1):
         super().__init__(dim=1)
-        self.x_left = float(x_left)
-        self.x_right = float(x_right)
+        self.x0 = float(x0)
+        self.x1 = float(x1)
 
     def sample_interior(self, n_points, method='random', rng=None):
         if rng is None:
@@ -98,14 +98,14 @@ class Interval(Geometry):
         
         if method == 'random':
             return jax.random.uniform(
-                rng, shape=(n_points, 1), minval=self.x_left, maxval=self.x_right
+                rng, shape=(n_points, 1), minval=self.x0, maxval=self.x1
             )
         if method == 'uniform':
-            return jnp.linspace(self.x_left, self.x_right, n_points).reshape(-1, 1)
+            return jnp.linspace(self.x0, self.x1, n_points).reshape(-1, 1)
         raise ValueError(f"Unknown method: {method}")
 
     def sample_boundary(self):
-        return jnp.array([[self.x_left], [self.x_right]])
+        return jnp.array([[self.x0], [self.x1]])
 
     def generate_collocation(self, n_interior=100, method='random', rng=None):
         if rng is None:

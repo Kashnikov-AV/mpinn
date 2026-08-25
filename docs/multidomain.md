@@ -38,8 +38,8 @@ MPINN(nets, opt, weights, phys, n_collocation=100, rng=None)
 
 | Атрибут | Тип | Описание |
 |---------|-----|----------|
-| `x_left` | float | Левая граница области |
-| `x_right` | float | Правая граница области |
+| `x0` | float | Левая граница области |
+| `x1` | float | Правая граница области |
 | `interfaces` | list[float] | Координаты границ между слоями |
 | `all_lambdas` | list[float] | Теплопроводности каждого слоя |
 | `T_left` | float | Температура на левой границе |
@@ -71,7 +71,7 @@ create_loss_fn(pde_fn, bc_left_fn, bc_right_fn, phys)
 2. **Boundary conditions** — условия на внешних границах
 3. **Interface conditions** — условия сопряжения на границах слоёв:
    - Непрерывность температуры: `T_left = T_right`
-   - Непрерывность теплового потока: `λ_left·dT/dx_left = λ_right·dT/dx_right`
+   - Непрерывность теплового потока: `λ_left·dT/dx0 = λ_right·dT/dx1`
 
 **Параметры:**
 
@@ -263,8 +263,8 @@ from bc import dirichlet_bc
 
 # Физические параметры для двухслойной стены
 class PhysicsMulti:
-    x_left = 0.0
-    x_right = 0.3
+    x0 = 0.0
+    x1 = 0.3
     interfaces = [0.1]  # Граница между слоями на x = 0.1 м
     
     # Теплопроводности слоёв
@@ -297,8 +297,8 @@ mpinn = MPINN(
 )
 
 # Граничные условия
-bc_left = lambda m: dirichlet_bc(m, phys.x_left, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x_right, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
 
 # Обучение
 history, training_time = mpinn.fit(
@@ -310,7 +310,7 @@ history, training_time = mpinn.fit(
 )
 
 # Предсказание
-x_test = jnp.linspace(phys.x_left, phys.x_right, 200).reshape(-1, 1)
+x_test = jnp.linspace(phys.x0, phys.x1, 200).reshape(-1, 1)
 T_pred = mpinn.predict(x_test)
 
 # Оценка (если есть аналитическое решение)
@@ -326,8 +326,8 @@ mpinn.save_plot(x_test, T_pred, T_exact, phys, "multilayer_solution.png")
 
 ```python
 class PhysicsThreeLayers:
-    x_left = 0.0
-    x_right = 0.3
+    x0 = 0.0
+    x1 = 0.3
     interfaces = [0.1, 0.2]  # Две границы раздела
     
     all_lambdas = [1.0, 0.5, 2.0]  # Три слоя

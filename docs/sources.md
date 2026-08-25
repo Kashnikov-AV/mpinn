@@ -52,8 +52,8 @@ source_fn = constant_source(1000.0)
 
 # Использование в PhysicsParams
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=source_fn
@@ -100,8 +100,8 @@ from mpinn.sources import gaussian_source
 source_fn = gaussian_source(center=0.5, width=0.1, amplitude=5000.0)
 
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=source_fn
@@ -150,8 +150,8 @@ from mpinn.sources import point_source
 source_fn = point_source(location=0.3, epsilon=0.01, amplitude=100.0)
 
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=source_fn
@@ -197,8 +197,8 @@ def sinusoidal_source(x):
 source_fn = custom_source(sinusoidal_source)
 
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=source_fn
@@ -226,8 +226,8 @@ from mpinn.sources import no_source
 
 # Явное указание отсутствия источника
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=no_source()
@@ -235,8 +235,8 @@ phys = PhysicsParams(
 
 # Эквивалентно (по умолчанию source_fn=None)
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0
 )
@@ -260,8 +260,8 @@ import optax
 # === Пример 1: Постоянный источник ===
 
 phys1 = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=constant_source(1000.0)  # 1000 Вт/м³
@@ -270,8 +270,8 @@ phys1 = PhysicsParams(
 # === Пример 2: Гауссов источник ===
 
 phys2 = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=gaussian_source(center=0.5, width=0.1, amplitude=5000.0)
@@ -280,8 +280,8 @@ phys2 = PhysicsParams(
 # === Пример 3: Точечный источник ===
 
 phys3 = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=point_source(location=0.3, epsilon=0.01, amplitude=100.0)
@@ -294,8 +294,8 @@ def polynomial_source(x):
     return 1000.0 * (1.0 - x ** 2)
 
 phys4 = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=custom_source(polynomial_source)
@@ -325,11 +325,11 @@ net = FCNet(
 optimizer = optax.adam(config.lr)
 pinn = PINN(net, opt=optimizer, weights=config.weights)
 
-geom = Interval(phys1.x_left, phys1.x_right)
+geom = Interval(phys1.x0, phys1.x1)
 x_collocation = geom.generate_collocation(n_interior=config.num_points)
 
-bc_left = lambda m: dirichlet_bc(m, phys1.x_left, phys1.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys1.x_right, phys1.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys1.x0, phys1.T_left)
+bc_right = lambda m: dirichlet_bc(m, phys1.x1, phys1.T_right)
 
 history, training_time = pinn.fit(
     x_collocation=x_collocation,
@@ -376,7 +376,7 @@ def line_1d(model, x, phys):
 
 ### Для gaussian_source
 
-- `center`: должен находиться внутри области [x_left, x_right]
+- `center`: должен находиться внутри области [x0, x1]
 - `width`: обычно 0.01 – 0.2 м (зависит от размера области)
 - `amplitude`: 1000 – 10000 Вт/м³
 

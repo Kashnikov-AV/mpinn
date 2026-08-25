@@ -118,8 +118,8 @@ from mpinn.geom import Interval
 
 # Параметры физической задачи
 class Physics:
-    x_left = 0.0
-    x_right = 1.0
+    x0 = 0.0
+    x1 = 1.0
     T_left = 300.0  # K
     T_right = 400.0  # K
 
@@ -140,12 +140,12 @@ weights = [1.0, 1.0, 1.0]  # [PDE, BC_left, BC_right]
 pinn = PINN(net, optimizer, weights)
 
 # Генерация точек коллокации
-geometry = Interval(phys.x_left, phys.x_right)
+geometry = Interval(phys.x0, phys.x1)
 x_collocation = geometry.generate_collocation(n_interior=100)
 
 # Граничные условия
-bc_left = lambda model: dirichlet_bc(model, x=phys.x_left, T=phys.T_left)
-bc_right = lambda model: dirichlet_bc(model, x=phys.x_right, T=phys.T_right)
+bc_left = lambda model: dirichlet_bc(model, x=phys.x0, T=phys.T_left)
+bc_right = lambda model: dirichlet_bc(model, x=phys.x1, T=phys.T_right)
 
 # Обучение
 history, training_time = pinn.fit(
@@ -157,7 +157,7 @@ history, training_time = pinn.fit(
 )
 
 # Предсказание
-x_test = jnp.linspace(phys.x_left, phys.x_right, 100).reshape(-1, 1)
+x_test = jnp.linspace(phys.x0, phys.x1, 100).reshape(-1, 1)
 T_pred = pinn.predict(x_test)
 T_exact = line_1d_dirichlet_exact(x_test.ravel(), phys)
 
@@ -180,8 +180,8 @@ source_fn = sources.gaussian_source(center=0.5, width=0.1, amplitude=100.0)
 
 # Физические параметры с источником
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_right=400.0,
     source_fn=source_fn  # Добавляем источник
@@ -210,8 +210,8 @@ from mpinn.bc import dirichlet_bc
 
 # Параметры для двухслойной стены
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=0.2,
+    x0=0.0,
+    x1=0.2,
     interfaces=[0.1],           # Один интерфейс между слоями
     all_lambdas=[1.0, 0.5],     # Теплопроводности слоёв
     T_left=300.0,               # Температура на левой границе
@@ -237,14 +237,14 @@ mpinn = MPINN(
 # Обучение
 history, training_time = mpinn.fit(
     pde_fn=line_1d,
-    bc_left_fn=lambda m: dirichlet_bc(m, x=phys.x_left, T=phys.T_left),
-    bc_right_fn=lambda m: dirichlet_bc(m, x=phys.x_right, T=phys.T_right),
+    bc_left_fn=lambda m: dirichlet_bc(m, x=phys.x0, T=phys.T_left),
+    bc_right_fn=lambda m: dirichlet_bc(m, x=phys.x1, T=phys.T_right),
     phys=phys,
     epochs=10000
 )
 
 # Предсказание
-x_test = jnp.linspace(phys.x_left, phys.x_right, 200).reshape(-1, 1)
+x_test = jnp.linspace(phys.x0, phys.x1, 200).reshape(-1, 1)
 T_pred = mpinn.predict(x_test)
 
 # Метрики (если есть точное решение)
@@ -263,8 +263,8 @@ from mpinn.bc import dirichlet_bc, neuman_bc
 
 # Параметры для трёхслойной стены
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=0.3,
+    x0=0.0,
+    x1=0.3,
     interfaces=[0.1, 0.2],        # Два интерфейса (границы между слоями)
     all_lambdas=[1.0, 0.5, 2.0],  # Теплопроводности трёх слоёв
     T_left=300.0,
@@ -288,8 +288,8 @@ mpinn = MPINN(
 )
 
 # Граничные условия
-bc_left = lambda model: dirichlet_bc(model, x=phys.x_left, T=phys.T_left)
-bc_right = lambda model: dirichlet_bc(model, x=phys.x_right, T=phys.T_right)
+bc_left = lambda model: dirichlet_bc(model, x=phys.x0, T=phys.T_left)
+bc_right = lambda model: dirichlet_bc(model, x=phys.x1, T=phys.T_right)
 
 # Обучение
 history, training_time = mpinn.fit(
@@ -302,7 +302,7 @@ history, training_time = mpinn.fit(
 )
 
 # Предсказание и визуализация
-x_test = jnp.linspace(phys.x_left, phys.x_right, 300).reshape(-1, 1)
+x_test = jnp.linspace(phys.x0, phys.x1, 300).reshape(-1, 1)
 T_pred = mpinn.predict(x_test)
 
 # Сохранение графика с маркерами интерфейсов
@@ -344,8 +344,8 @@ from mpinn.runner import run_experiment
 
 # Конфигурация физики
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_inf=500.0,
     _lambda=1.0,
@@ -450,7 +450,7 @@ print(f"MSE: {result['mse']}, MAPE: {result['mape']}")
   - `generate_collocation(...)` — все точки коллокации
   - `plot_domain(...)` — визуализация (2D/3D)
 
-- **`Interval(x_left, x_right)`** — одномерный интервал
+- **`Interval(x0, x1)`** — одномерный интервал
 - **`Rectangle(x_min, x_max, y_min, y_max)`** — двумерный прямоугольник
 - **`Circle(cx, cy, radius)`** — двумерный круг
 - **`Box(x_min, x_max, y_min, y_max, z_min, z_max)`** — трёхмерный параллелепипед
@@ -546,7 +546,7 @@ compute_interface_loss(models, interfaces, all_lambdas)
 Классы данных для конфигурации экспериментов:
 
 - **`PhysicsParams`** — физические параметры задачи:
-  - `x_left`, `x_right` — границы области
+  - `x0`, `x1` — границы области
   - `T_left`, `T_right` — температуры на границах
   - `_lambda` — теплопроводность
   - `h` — коэффициент конвекции
@@ -702,13 +702,13 @@ from mpinn.bc import neuman_bc
 from mpinn.config import PhysicsParams
 
 class PhysicsNeuman:
-    x_left = 0.0
-    x_right = 1.0
+    x0 = 0.0
+    x1 = 1.0
     T_left = 300.0
     grad_right = 100.0  # K/м
 
 phys = PhysicsNeuman()
-bc_right = lambda model: neuman_bc(model, x=phys.x_right, g=phys.grad_right)
+bc_right = lambda model: neuman_bc(model, x=phys.x1, g=phys.grad_right)
 ```
 
 ### Задача с конвекцией (Робин)
@@ -718,8 +718,8 @@ from mpinn.bc import robin_bc
 from mpinn.config import PhysicsParams
 
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     h=10.0,          # Вт/(м²·K)
     _lambda=1.0,     # Вт/(м·K)
@@ -730,7 +730,7 @@ phys = PhysicsParams(
 # где α=h, β=λ, γ=h·T_inf
 bc_right = lambda model: robin_bc(
     model, 
-    x=phys.x_right, 
+    x=phys.x1, 
     alpha=phys.h, 
     beta=phys._lambda, 
     h=phys.h * phys.T_inf
@@ -746,8 +746,8 @@ from mpinn.config import PhysicsParams
 
 # Параметры для трёхслойной стены
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=0.3,
+    x0=0.0,
+    x1=0.3,
     interfaces=[0.1, 0.2],        # Границы между слоями
     all_lambdas=[1.0, 0.5, 2.0],  # Теплопроводности слоёв
     T_left=300.0,
@@ -787,7 +787,7 @@ param_grid = {
 }
 
 base_config = TrainConfig()
-phys = PhysicsParams(x_left=0.0, x_right=1.0, T_left=300.0, T_right=400.0)
+phys = PhysicsParams(x0=0.0, x1=1.0, T_left=300.0, T_right=400.0)
 
 df_results = run_grid_search(
     param_grid=param_grid,

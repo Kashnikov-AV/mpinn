@@ -40,26 +40,26 @@ sample_boundary(self)
 
 ### Interval (одномерная геометрия)
 
-Одномерный интервал [x_left, x_right].
+Одномерный интервал [x0, x1].
 
 #### Конструктор
 
 ```python
-Interval(x_left, x_right)
+Interval(x0, x1)
 ```
 
 **Параметры:**
 
 | Параметр | Тип | Описание |
 |----------|-----|----------|
-| `x_left` | float | Левая граница интервала |
-| `x_right` | float | Правая граница интервала |
+| `x0` | float | Левая граница интервала |
+| `x1` | float | Правая граница интервала |
 
 **Атрибуты:**
 
 - `dim = 1`
-- `x_left` — левая граница
-- `x_right` — правая граница
+- `x0` — левая граница
+- `x1` — правая граница
 
 #### Метод `sample_interior`
 
@@ -105,7 +105,7 @@ sample_boundary()
 
 **Возвращает:**
 
-- `jax.Array` формы `(2, 1)` — [[x_left], [x_right]]
+- `jax.Array` формы `(2, 1)` — [[x0], [x1]]
 
 **Пример:**
 
@@ -279,9 +279,9 @@ from pinn_core import PINN
 from geom import Interval
 
 # Геометрия
-phys_x_left = 0.0
-phys_x_right = 1.0
-geometry = Interval(phys_x_left, phys_x_right)
+phys_x0 = 0.0
+phys_x1 = 1.0
+geometry = Interval(phys_x0, phys_x1)
 
 # Точки коллокации
 x_collocation = geometry.generate_collocation(n_interior=100)
@@ -363,15 +363,15 @@ from geom import Interval
 
 # Физические параметры
 class Physics:
-    x_left = 0.0
-    x_right = 1.0
+    x0 = 0.0
+    x1 = 1.0
     T_left = 300.0
     T_right = 400.0
 
 phys = Physics()
 
 # Создание геометрии
-geometry = Interval(phys.x_left, phys.x_right)
+geometry = Interval(phys.x0, phys.x1)
 
 # Генерация точек коллокации
 x_collocation = geometry.generate_collocation(n_interior=100, method='random')
@@ -383,8 +383,8 @@ print(f"Форма точек коллокации: {x_collocation.shape}")
 net = FCNet(1, 50, 1, 4, nnx.tanh, nnx.Rngs(0))
 pinn = PINN(net, optax.adam(1e-3), weights=[1.0, 1.0, 1.0])
 
-bc_left = lambda m: dirichlet_bc(m, phys.x_left, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x_right, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
 
 history, time = pinn.fit(
     x_collocation=x_collocation,
@@ -395,7 +395,7 @@ history, time = pinn.fit(
 )
 
 # Оценка
-x_test = jnp.linspace(phys.x_left, phys.x_right, 100).reshape(-1, 1)
+x_test = jnp.linspace(phys.x0, phys.x1, 100).reshape(-1, 1)
 metrics, T_pred, T_exact = pinn.evaluate(x_test, line_1d_dirichlet_exact, phys)
 print(f"MAE: {metrics['mae']}")
 ```

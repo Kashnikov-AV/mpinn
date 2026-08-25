@@ -26,14 +26,14 @@ class TestPINNIntegration:
         net = FCNet(din=1, dmid=20, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs)
         
         # Define loss function
-        def compute_loss(model, x_col, x_left, x_right):
+        def compute_loss(model, x_col, x0, x1):
             # PDE residual loss
             pde_residual = line_1d(model, x_col, phys=None)
             pde_loss = jnp.mean(pde_residual ** 2)
             
             # BC losses
-            bc_left_loss = dirichlet_bc(model, x_left, 0.0)
-            bc_right_loss = dirichlet_bc(model, x_right, 1.0)
+            bc_left_loss = dirichlet_bc(model, x0, 0.0)
+            bc_right_loss = dirichlet_bc(model, x1, 1.0)
             
             total_loss = pde_loss + bc_left_loss + bc_right_loss
             return total_loss

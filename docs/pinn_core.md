@@ -372,8 +372,8 @@ from geom import Interval
 
 # Физические параметры
 class Physics:
-    x_left = 0.0
-    x_right = 1.0
+    x0 = 0.0
+    x1 = 1.0
     T_left = 300.0
     T_right = 400.0
 
@@ -390,12 +390,12 @@ weights = [1.0, 1.0, 1.0]
 pinn = PINN(net, optimizer, weights)
 
 # Геометрия
-geometry = Interval(phys.x_left, phys.x_right)
+geometry = Interval(phys.x0, phys.x1)
 x_collocation = geometry.generate_collocation(n_interior=100)
 
 # Граничные условия
-bc_left = lambda m: dirichlet_bc(m, phys.x_left, phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, phys.x_right, phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, phys.x0, phys.T_left)
+bc_right = lambda m: dirichlet_bc(m, phys.x1, phys.T_right)
 
 # Обучение
 history, training_time = pinn.fit(

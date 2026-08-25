@@ -102,12 +102,12 @@ from bc import dirichlet_bc
 import jax.numpy as jnp
 
 # Левая граница: T = 300 K (несколько точек)
-x_left = jnp.array([0.0, 0.01, 0.02])
-bc_left = lambda model: dirichlet_bc(model, x=x_left, T=300.0)
+x0 = jnp.array([0.0, 0.01, 0.02])
+bc_left = lambda model: dirichlet_bc(model, x=x0, T=300.0)
 
 # Правая граница: T = 400 K
-x_right = jnp.array([1.0, 0.99, 0.98])
-bc_right = lambda model: dirichlet_bc(model, x=x_right, T=400.0)
+x1 = jnp.array([1.0, 0.99, 0.98])
+bc_right = lambda model: dirichlet_bc(model, x=x1, T=400.0)
 ```
 
 ---
@@ -141,12 +141,12 @@ from bc import neuman_bc
 import jax.numpy as jnp
 
 # Теплоизолированная граница: dT/dx = 0 (несколько точек)
-x_left = jnp.array([0.0, 0.01, 0.02])
-bc_insulated = lambda model: neuman_bc(model, x=x_left, g=0.0)
+x0 = jnp.array([0.0, 0.01, 0.02])
+bc_insulated = lambda model: neuman_bc(model, x=x0, g=0.0)
 
 # Заданный тепловой поток: dT/dx = 100 K/м
-x_right = jnp.array([1.0, 0.99, 0.98])
-bc_flux = lambda model: neuman_bc(model, x=x_right, g=100.0)
+x1 = jnp.array([1.0, 0.99, 0.98])
+bc_flux = lambda model: neuman_bc(model, x=x1, g=100.0)
 ```
 
 ---
@@ -189,10 +189,10 @@ h_conv = 10.0      # Вт/(м²·K)
 _lambda = 1.0      # Вт/(м·K)
 T_inf = 500.0      # K
 
-x_right = jnp.array([1.0, 0.99, 0.98])
+x1 = jnp.array([1.0, 0.99, 0.98])
 bc_convection = lambda model: robin_bc(
     model, 
-    x=x_right,
+    x=x1,
     alpha=h_conv, 
     beta=_lambda, 
     h=h_conv * T_inf
@@ -214,11 +214,11 @@ import jax.numpy as jnp
 pinn = PINN(net, optimizer, weights=[1.0, 1.0, 1.0])
 
 # Определение граничных условий (с несколькими точками)
-x_left = jnp.linspace(phys.x_left, phys.x_left + 0.01, 5)
-x_right = jnp.linspace(phys.x_right - 0.01, phys.x_right, 5)
+x0 = jnp.linspace(phys.x0, phys.x0 + 0.01, 5)
+x1 = jnp.linspace(phys.x1 - 0.01, phys.x1, 5)
 
-bc_left = lambda m: dirichlet_bc(m, x=x_left, T=phys.T_left)
-bc_right = lambda m: neuman_bc(m, x=x_right, g=phys.grad_right)
+bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T_left)
+bc_right = lambda m: neuman_bc(m, x=x1, g=phys.grad_right)
 
 # Обучение
 history, time = pinn.fit(
@@ -240,19 +240,19 @@ history, time = pinn.fit(
 import jax.numpy as jnp
 
 class Physics:
-    x_left = 0.0
-    x_right = 1.0
+    x0 = 0.0
+    x1 = 1.0
     T_left = 300.0
     T_right = 400.0
 
 phys = Physics()
 
 # Несколько точек на каждой границе для лучшего обучения
-x_left = jnp.linspace(phys.x_left, phys.x_left + 0.01, 5)
-x_right = jnp.linspace(phys.x_right - 0.01, phys.x_right, 5)
+x0 = jnp.linspace(phys.x0, phys.x0 + 0.01, 5)
+x1 = jnp.linspace(phys.x1 - 0.01, phys.x1, 5)
 
-bc_left = lambda m: dirichlet_bc(m, x=x_left, T=phys.T_left)
-bc_right = lambda m: dirichlet_bc(m, x=x_right, T=phys.T_right)
+bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T_left)
+bc_right = lambda m: dirichlet_bc(m, x=x1, T=phys.T_right)
 
 pinn.fit(..., bc_fns=[bc_left, bc_right], ...)
 ```
@@ -261,18 +261,18 @@ pinn.fit(..., bc_fns=[bc_left, bc_right], ...)
 
 ```python
 class Physics:
-    x_left = 0.0
-    x_right = 1.0
+    x0 = 0.0
+    x1 = 1.0
     T_left = 300.0
     grad_right = 0.0  # Теплоизолированная граница
 
 phys = Physics()
 
-x_left = jnp.linspace(phys.x_left, phys.x_left + 0.01, 5)
-x_right = jnp.linspace(phys.x_right - 0.01, phys.x_right, 5)
+x0 = jnp.linspace(phys.x0, phys.x0 + 0.01, 5)
+x1 = jnp.linspace(phys.x1 - 0.01, phys.x1, 5)
 
-bc_left = lambda m: dirichlet_bc(m, x=x_left, T=phys.T_left)
-bc_right = lambda m: neuman_bc(m, x=x_right, g=phys.grad_right)
+bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T_left)
+bc_right = lambda m: neuman_bc(m, x=x1, g=phys.grad_right)
 
 pinn.fit(..., bc_fns=[bc_left, bc_right], ...)
 ```
@@ -281,8 +281,8 @@ pinn.fit(..., bc_fns=[bc_left, bc_right], ...)
 
 ```python
 class Physics:
-    x_left = 0.0
-    x_right = 1.0
+    x0 = 0.0
+    x1 = 1.0
     T_left = 300.0
     h_conv = 10.0       # Вт/(м²·K)
     _lambda = 1.0       # Вт/(м·K)
@@ -290,13 +290,13 @@ class Physics:
 
 phys = Physics()
 
-x_left = jnp.linspace(phys.x_left, phys.x_left + 0.01, 5)
-x_right = jnp.linspace(phys.x_right - 0.01, phys.x_right, 5)
+x0 = jnp.linspace(phys.x0, phys.x0 + 0.01, 5)
+x1 = jnp.linspace(phys.x1 - 0.01, phys.x1, 5)
 
-bc_left = lambda m: dirichlet_bc(m, x=x_left, T=phys.T_left)
+bc_left = lambda m: dirichlet_bc(m, x=x0, T=phys.T_left)
 bc_right = lambda m: robin_bc(
     m, 
-    x=x_right,
+    x=x1,
     alpha=phys.h_conv,
     beta=phys._lambda,
     h=phys.h_conv * phys.T_inf

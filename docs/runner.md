@@ -65,8 +65,8 @@ config = TrainConfig(
 )
 
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_inf=500.0,
     _lambda=1.0,
@@ -134,8 +134,8 @@ base_config = TrainConfig(
 )
 
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_inf=500.0,
     _lambda=1.0,
@@ -258,8 +258,8 @@ import pandas as pd
 # === Пример 1: Одиночный эксперимент ===
 
 phys = PhysicsParams(
-    x_left=0.0,
-    x_right=1.0,
+    x0=0.0,
+    x1=1.0,
     T_left=300.0,
     T_inf=500.0,
     _lambda=1.0,

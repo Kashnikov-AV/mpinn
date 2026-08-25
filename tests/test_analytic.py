@@ -10,9 +10,9 @@ from mpinn.analytic import (
 
 class DummyPhys:
     """Dummy physics object for testing."""
-    def __init__(self, x_left=0.0, x_right=1.0, T_left=0.0, T_right=1.0):
-        self.x_left = x_left
-        self.x_right = x_right
+    def __init__(self, x0=0.0, x1=1.0, T_left=0.0, T_right=1.0):
+        self.x0 = x0
+        self.x1 = x1
         self.T_left = T_left
         self.T_right = T_right
 
@@ -23,7 +23,7 @@ class TestAnalyticLine1D:
     def test_line_solution_shape(self):
         """Check that solution has correct shape."""
         x = jnp.linspace(0.0, 1.0, 20).reshape(-1, 1)
-        phys = DummyPhys(x_left=0.0, x_right=1.0, T_left=0.0, T_right=1.0)
+        phys = DummyPhys(x0=0.0, x1=1.0, T_left=0.0, T_right=1.0)
         
         u = line_1d_dirichlet_exact(x, phys)
         
@@ -31,13 +31,13 @@ class TestAnalyticLine1D:
 
     def test_line_solution_boundary_values(self):
         """Check that solution satisfies boundary conditions."""
-        phys = DummyPhys(x_left=0.0, x_right=1.0, T_left=5.0, T_right=-3.0)
+        phys = DummyPhys(x0=0.0, x1=1.0, T_left=5.0, T_right=-3.0)
         
-        x_left = jnp.array([[phys.x_left]], dtype=jnp.float32)
-        x_right = jnp.array([[phys.x_right]], dtype=jnp.float32)
+        x0 = jnp.array([[phys.x0]], dtype=jnp.float32)
+        x1 = jnp.array([[phys.x1]], dtype=jnp.float32)
         
-        u_left = line_1d_dirichlet_exact(x_left, phys)
-        u_right = line_1d_dirichlet_exact(x_right, phys)
+        u_left = line_1d_dirichlet_exact(x0, phys)
+        u_right = line_1d_dirichlet_exact(x1, phys)
         
         assert jnp.isclose(u_left[0], phys.T_left, atol=1e-6), f"Left BC not satisfied"
         assert jnp.isclose(u_right[0], phys.T_right, atol=1e-6), f"Right BC not satisfied"
@@ -58,7 +58,7 @@ class TestAnalyticCylinder1D:
     def test_cylinder_solution_shape(self):
         """Check solution shape for cylindrical case."""
         x = jnp.linspace(0.1, 1.0, 20).reshape(-1, 1)  # Avoid r=0
-        phys = DummyPhys(x_left=0.1, x_right=1.0, T_left=1.0, T_right=0.0)
+        phys = DummyPhys(x0=0.1, x1=1.0, T_left=1.0, T_right=0.0)
         
         u = cylinder_1d_dirichlet_exact(x, phys)
         
@@ -69,7 +69,7 @@ class TestAnalyticCylinder1D:
         r_inner = 0.5
         r_outer = 2.0
         
-        phys = DummyPhys(x_left=r_inner, x_right=r_outer, T_left=10.0, T_right=0.0)
+        phys = DummyPhys(x0=r_inner, x1=r_outer, T_left=10.0, T_right=0.0)
         
         x_inner = jnp.array([[r_inner]], dtype=jnp.float32)
         x_outer = jnp.array([[r_outer]], dtype=jnp.float32)
@@ -87,7 +87,7 @@ class TestAnalyticSphere1D:
     def test_sphere_solution_shape(self):
         """Check solution shape for spherical case."""
         x = jnp.linspace(0.1, 1.0, 20).reshape(-1, 1)
-        phys = DummyPhys(x_left=0.1, x_right=1.0, T_left=1.0, T_right=0.0)
+        phys = DummyPhys(x0=0.1, x1=1.0, T_left=1.0, T_right=0.0)
         
         u = sphere_1d_dirichlet_exact(x, phys)
         
@@ -98,7 +98,7 @@ class TestAnalyticSphere1D:
         r_inner = 1.0
         r_outer = 3.0
         
-        phys = DummyPhys(x_left=r_inner, x_right=r_outer, T_left=100.0, T_right=50.0)
+        phys = DummyPhys(x0=r_inner, x1=r_outer, T_left=100.0, T_right=50.0)
         
         x_inner = jnp.array([[r_inner]], dtype=jnp.float32)
         x_outer = jnp.array([[r_outer]], dtype=jnp.float32)
@@ -116,7 +116,7 @@ class TestAnalyticDeterminism:
     def test_all_solutions_deterministic(self):
         """All analytic solutions should be deterministic."""
         x = jnp.linspace(0.1, 1.0, 15).reshape(-1, 1)
-        phys = DummyPhys(x_left=0.1, x_right=1.0, T_left=1.0, T_right=0.0)
+        phys = DummyPhys(x0=0.1, x1=1.0, T_left=1.0, T_right=0.0)
         
         # Line
         u1_line = line_1d_dirichlet_exact(x, phys)

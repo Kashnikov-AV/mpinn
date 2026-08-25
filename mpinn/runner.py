@@ -51,7 +51,7 @@ def run_experiment(
         exact_fn = line_1d_robin_exact
     
     # Геометрия и точки коллокации
-    geom = Interval(phys.x_left, phys.x_right)
+    geom = Interval(phys.x0, phys.x1)
     x_collocation = geom.generate_collocation(n_interior=config.num_points, method='random')
     
     # Создание модели
@@ -73,8 +73,8 @@ def run_experiment(
         bc_fns = bc_fns_override
     else:
         bc_fns = [
-            partial(dirichlet_bc, x=phys.x_left, T=phys.T_left),
-            partial(robin_bc, x=phys.x_right, alpha=phys.alpha_right, beta=phys.beta_right, h=phys.gamma_right)
+            partial(dirichlet_bc, x=phys.x0, T=phys.T0),
+            partial(robin_bc, x=phys.x1, alpha=phys.alpha, beta=phys.beta, h=phys.gamma)
         ]
     
     # Обучение с Early Stopping
@@ -91,7 +91,7 @@ def run_experiment(
     )
     
     # Верификация
-    x_test = jnp.linspace(phys.x_left, phys.x_right, 100).reshape(-1, 1)
+    x_test = jnp.linspace(phys.x0, phys.x1, 100).reshape(-1, 1)
     metrics, T_pred, T_exact = pinn.evaluate(
         x_test, exact_fn, phys, bc_names=['dirichlet', 'robin']
     )
