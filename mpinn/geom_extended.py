@@ -720,26 +720,28 @@ class MeshGeometry(Geometry):
         # Import here to avoid circular imports
         from .geometry_io import sample_points_on_surface
 
-        if marker is not None and self.boundary_markers is not None:
+        if (
+            marker is not None
+            and self.boundary_markers is not None
+            and marker in self.boundary_markers
+        ):
             # Sample from specific boundary region
-            if marker in self.boundary_markers:
-                face_indices = self.boundary_markers[marker]
-                self.faces[face_indices]
-                subset_normals = (
-                    self.normals[face_indices] if self.normals is not None else None
-                )
+            face_indices = self.boundary_markers[marker]
+            subset_normals = (
+                self.normals[face_indices] if self.normals is not None else None
+            )
 
-                # Create temporary mesh for this boundary
-                temp_mesh = MeshData(
-                    vertices=self.mesh_data.vertices,
-                    faces=np.array(face_indices),
-                    normals=np.array(subset_normals)
-                    if subset_normals is not None
-                    else None,
-                    dim=self.dim,
-                )
-                points, normals = sample_points_on_surface(temp_mesh, n_points, rng)
-                return points, normals
+            # Create temporary mesh for this boundary
+            temp_mesh = MeshData(
+                vertices=self.mesh_data.vertices,
+                faces=np.array(face_indices),
+                normals=np.array(subset_normals)
+                if subset_normals is not None
+                else None,
+                dim=self.dim,
+            )
+            points, normals = sample_points_on_surface(temp_mesh, n_points, rng)
+            return points, normals
 
         # Sample from entire boundary
         return sample_points_on_surface(self.mesh_data, n_points, rng)
