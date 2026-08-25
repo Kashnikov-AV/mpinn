@@ -1,48 +1,50 @@
-from . import analytic
-from . import bc
-from . import config
-from . import geom
-from . import multidomain
-from . import pde
-from . import pinn_core
-from . import plotting
-from . import runner
-from . import sources
-from . import weight_strategies
-from . import geometry_io
-from . import geom_extended
-from . import pde_2d_3d
-from . import bc_2d_3d
+from . import (
+    analytic,
+    bc,
+    bc_2d_3d,
+    config,
+    geom,
+    geom_extended,
+    geometry_io,
+    multidomain,
+    pde,
+    pde_2d_3d,
+    pinn_core,
+    plotting,
+    runner,
+    sources,
+    weight_strategies,
+)
 
 # Экспорт новых классов геометрий
 from .geom_extended import (
-    GeometryBase,
     Annulus2D,
+    GeometryBase,
     HollowCylinder3D,
     HollowSphere3D,
     MeshGeometry,
 )
 
 __all__ = [
-    'analytic',
-    'bc',
-    'config',
-    'geom',
-    'multidomain',
-    'pde',
-    'pinn_core',
-    'plotting',
-    'runner',
-    'sources',
-    'weight_strategies',
-    'geometry_io',
-    'geom_extended',
-    'pde_2d_3d',
-    'bc_2d_3d',
+    "Annulus2D",
     # Новые классы
-    'GeometryBase',
-    'Annulus2D',
-    'HollowCylinder3D',
-    'HollowSphere3D',
-    'MeshGeometry',
+    "GeometryBase",
+    "HollowCylinder3D",
+    "HollowSphere3D",
+    "MeshGeometry",
+    "analytic",
+    "bc",
+    "bc_2d_3d",
+    "config",
+    "geom",
+    "geom_extended",
+    "geometry_io",
+    "multidomain",
+    "pde",
+    "pde_2d_3d",
+    "pinn_core",
+    "plotting",
+    "runner",
+    "sources",
+    "weight_strategies",
 ]
