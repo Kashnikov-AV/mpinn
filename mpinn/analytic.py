@@ -2,11 +2,11 @@ import jax.numpy as jnp
 
 def line_1d_dirichlet_exact(x, phys):
     x0, x1 = phys.x0, phys.x1
-    T0, T1 = phys.T_left, phys.T_right
+    T0, T1 = phys.T0, phys.T1
     return T0 + (T1 - T0) * (x - x0) / (x1 - x0)
 
 def line_1d_neuman_exact(x, phys):
-    return phys.T_left + phys.grad_right * (x - phys.x0)
+    return phys.T0 + phys.grad_right * (x - phys.x0)
 
 def line_1d_robin_exact(x, phys):
     x0 = phys.x0
@@ -15,21 +15,21 @@ def line_1d_robin_exact(x, phys):
     h = phys.h
     _lambda = phys._lambda
     T_inf = phys.T_inf
-    T_left = phys.T_left
+    T0 = phys.T0
 
     # Условие Робина: h·T + λ·dT/dx = h·T_inf
     # Общее решение: T(x) = A·x + B
-    # Из левой границы: B = T_left - A·x0
+    # Из левой границы: B = T0 - A·x0
     # Подстановка в правую границу даёт:
     denominator = h * (x1 - x0) + _lambda
-    A = h * (T_inf - T_left) / denominator
-    B = T_left - A * x0
+    A = h * (T_inf - T0) / denominator
+    B = T0 - A * x0
 
     return A * x + B
 
 def cylinder_1d_dirichlet_exact(x, phys):
     r0, r1 = phys.x0, phys.x1
-    T0, T1 = phys.T_left, phys.T_right
+    T0, T1 = phys.T0, phys.T1
     ln_r0 = jnp.log(r0)
     ln_r1 = jnp.log(r1)
     return T0 + (T1 - T0) * (jnp.log(x) - ln_r0) / (ln_r1 - ln_r0)
@@ -39,7 +39,7 @@ def cylinder_1d_neuman_exact(x, phys):
     # Константа интегрирования: для цилиндра dT/dr = C/r
     # Из условия Неймана: C = grad_right * r1
     C = phys.grad_right * r1
-    return phys.T_left + C * (jnp.log(x) - jnp.log(r0))
+    return phys.T0 + C * (jnp.log(x) - jnp.log(r0))
 
 def cylinder_1d_robin_exact(x, phys):
     r0 = phys.x0
@@ -47,19 +47,19 @@ def cylinder_1d_robin_exact(x, phys):
 
     h = phys.h
     _lambda = phys._lambda
-    T_left = phys.T_left
+    T0 = phys.T0
     T_inf = phys.T_inf
 
     # Константа интегрирования, найденная из условия конвекции на r = r1
     denominator = _lambda + h * r1 * jnp.log(r1 / r0)
-    C1 = h * r1 * (T_inf - T_left) / denominator
+    C1 = h * r1 * (T_inf - T0) / denominator
 
-    # Общее решение: T(r) = T_left + C1 * ln(r/r0)
-    return T_left + C1 * jnp.log(x / r0)
+    # Общее решение: T(r) = T0 + C1 * ln(r/r0)
+    return T0 + C1 * jnp.log(x / r0)
 
 def sphere_1d_dirichlet_exact(x, phys):
     r0, r1 = phys.x0, phys.x1
-    T0, T1 = phys.T_left, phys.T_right
+    T0, T1 = phys.T0, phys.T1
     inv_r0 = 1.0 / r0
     inv_r1 = 1.0 / r1
     inv_x = 1.0 / x
@@ -68,7 +68,7 @@ def sphere_1d_dirichlet_exact(x, phys):
 def sphere_1d_neuman_exact(x, phys):
     r0 = phys.x0
     r1 = phys.x1
-    return phys.T_left - phys.grad_right * r1**2 * (1.0 / x - 1.0 / r0)
+    return phys.T0 - phys.grad_right * r1**2 * (1.0 / x - 1.0 / r0)
 
 def sphere_1d_robin_exact(x, phys):
     r0 = phys.x0
@@ -76,17 +76,17 @@ def sphere_1d_robin_exact(x, phys):
 
     h = phys.h
     _lambda = phys._lambda
-    T_left = phys.T_left
+    T0 = phys.T0
     T_inf = phys.T_inf
 
-    # Общая форма решения для сферы: T(r) = T_left + C1 * (1/r0 - 1/r)
+    # Общая форма решения для сферы: T(r) = T0 + C1 * (1/r0 - 1/r)
     # Производная: dT/dr = C1 / r^2
     
     # Условие Робина на r1: -_lambda * dT/dr = h * (T - T_inf)
-    # -_lambda * (C1 / r1^2) = h * (T_left + C1*(1/r0 - 1/r1) - T_inf)
-    # C1 * [_lambda/r1^2 + h*(1/r0 - 1/r1)] = h * (T_inf - T_left)
+    # -_lambda * (C1 / r1^2) = h * (T0 + C1*(1/r0 - 1/r1) - T_inf)
+    # C1 * [_lambda/r1^2 + h*(1/r0 - 1/r1)] = h * (T_inf - T0)
     
     denominator = (_lambda / r1**2) + h * (1.0/r0 - 1.0/r1)
-    C1 = h * (T_inf - T_left) / denominator
+    C1 = h * (T_inf - T0) / denominator
 
-    return T_left + C1 * (1.0/r0 - 1.0/x)
+    return T0 + C1 * (1.0/r0 - 1.0/x)
