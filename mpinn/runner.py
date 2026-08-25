@@ -1,82 +1,88 @@
 """
 Логика запуска экспериментов: обучение с Early Stopping и Grid Search.
 """
-import time
+
 import os
-import pandas as pd
+import time
 from functools import partial
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Any
 
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
+import pandas as pd
+from flax import nnx
 
+from mpinn.config import PhysicsParams, TrainConfig, get_activation, get_optimizer
+from mpinn.plotting import save_plot, show_plot
+
+from .bc import dirichlet_bc, robin_bc
 from .geom import Interval
 from .pinn_core import PINN, FCNet
-from .bc import dirichlet_bc, robin_bc
-from mpinn.config import PhysicsParams, TrainConfig, get_activation, get_optimizer
-from mpinn.plotting import show_plot, save_plot
-from flax import nnx
+
 
 def run_experiment(
     config: TrainConfig,
-    phys: Optional[PhysicsParams] = None,
+    phys: PhysicsParams | None = None,
     pde_fn=None,
     exact_fn=None,
-    bc_fns_override: Optional[List] = None,
-) -> Tuple[Dict[str, Any], Dict[str, List[float]]]:
+    bc_fns_override: list | None = None,
+) -> tuple[dict[str, Any], dict[str, list[float]]]:
     """
     Запуск одного эксперимента с Early Stopping.
-    
+
     Параметры:
     - config: конфигурация обучения
     - phys: физические параметры (если None, используются значения по умолчанию)
     - pde_fn: функция PDE (если None, используется line_1d)
     - exact_fn: функция точного решения для верификации
     - bc_fns_override: список функций граничных условий (если None, создаются автоматически)
-    
+
     Возвращает:
     - metrics: словарь с метриками (mse, mape, и т.д.)
     - history: история обучения (losses по эпохам)
     """
-    from .pde import line_1d
     from .analytic import line_1d_robin_exact
-    
+    from .pde import line_1d
+
     if phys is None:
         phys = PhysicsParams()
-    
+
     if pde_fn is None:
         pde_fn = line_1d
-    
+
     if exact_fn is None:
         exact_fn = line_1d_robin_exact
-    
+
     # Геометрия и точки коллокации
     geom = Interval(phys.x0, phys.x1)
-    x_collocation = geom.generate_collocation(n_interior=config.num_points, method='random')
-    
+    x_collocation = geom.generate_collocation(
+        n_interior=config.num_points, method="random"
+    )
+
     # Создание модели
     act_fn = get_activation(config.activation_name)
     net = FCNet(
-        din=1, 
-        dmid=config.hidden_features, 
-        dout=1, 
-        num_layers=config.num_layers, 
-        activation=act_fn, 
-        rngs=nnx.Rngs(0)
+        din=1,
+        dmid=config.hidden_features,
+        dout=1,
+        num_layers=config.num_layers,
+        activation=act_fn,
+        rngs=nnx.Rngs(0),
     )
-    
+
     optimizer = get_optimizer(config.opt_name, lr=config.lr)
     pinn = PINN(net, opt=optimizer, weights=list(config.weights))
-    
+
     # Граничные условия
     if bc_fns_override is not None:
         bc_fns = bc_fns_override
     else:
         bc_fns = [
             partial(dirichlet_bc, x=phys.x0, T=phys.T0),
-            partial(robin_bc, x=phys.x1, alpha=phys.alpha, beta=phys.beta, h=phys.gamma)
+            partial(
+                robin_bc, x=phys.x1, alpha=phys.alpha, beta=phys.beta, h=phys.gamma
+            ),
         ]
-    
+
     # Обучение с Early Stopping
     history, training_time = _train_with_early_stopping(
         pinn=pinn,
@@ -89,44 +95,46 @@ def run_experiment(
         min_delta=config.min_delta,
         monitor=config.monitor,
     )
-    
+
     # Верификация
     x_test = jnp.linspace(phys.x0, phys.x1, 100).reshape(-1, 1)
     metrics, T_pred, T_exact = pinn.evaluate(
-        x_test, exact_fn, phys, bc_names=['dirichlet', 'robin']
+        x_test, exact_fn, phys, bc_names=["dirichlet", "robin"]
     )
-    
-    print(f'Эпохи: {len(history["steps"])}, Время: {training_time:.4f}c, MSE: {metrics["mse"]}')
-    
+
+    print(
+        f"Эпохи: {len(history['steps'])}, Время: {training_time:.4f}c, MSE: {metrics['mse']}"
+    )
+
     # Сохранение графика
     if config.save_img and config.image_path:
         os.makedirs(os.path.dirname(config.image_path), exist_ok=True)
         save_plot(x_test, T_pred, T_exact, phys, save_path=config.image_path)
-    
+
     # Показ графика
     if config.show_plot:
         show_plot(x_test, T_pred, T_exact, phys)
-    
+
     # Формирование результата
     result = {
-        'bc_left': metrics['bc_left'],
-        'bc_right': metrics['bc_right'],
-        'training_time': f'{training_time:.4f}',
-        'epochs_trained': len(history['steps']),
-        'lr': config.lr,
-        'activation_func': config.activation_name,
-        'layers': config.num_layers,
-        'neurons': config.hidden_features,
-        'optimizer': config.opt_name,
-        'collocation_points': config.num_points,
-        'mape': float(metrics['mape']),
-        'mae': float(metrics['mae']),
-        'mse': float(metrics['mse']),
-        'rmse': float(metrics['rmse']),
-        'max_error': float(metrics['max_error']),
-        'weights': str(config.weights),
+        "bc_left": metrics["bc_left"],
+        "bc_right": metrics["bc_right"],
+        "training_time": f"{training_time:.4f}",
+        "epochs_trained": len(history["steps"]),
+        "lr": config.lr,
+        "activation_func": config.activation_name,
+        "layers": config.num_layers,
+        "neurons": config.hidden_features,
+        "optimizer": config.opt_name,
+        "collocation_points": config.num_points,
+        "mape": float(metrics["mape"]),
+        "mae": float(metrics["mae"]),
+        "mse": float(metrics["mse"]),
+        "rmse": float(metrics["rmse"]),
+        "max_error": float(metrics["max_error"]),
+        "weights": str(config.weights),
     }
-    
+
     return result, history
 
 
@@ -134,16 +142,16 @@ def _train_with_early_stopping(
     pinn: PINN,
     x_collocation: jnp.ndarray,
     pde_fn,
-    bc_fns: List,
+    bc_fns: list,
     phys: PhysicsParams,
     max_epochs: int,
     patience: int,
     min_delta: float,
-    monitor: str = 'total_loss',
-) -> Tuple[Dict[str, List[float]], float]:
+    monitor: str = "total_loss",
+) -> tuple[dict[str, list[float]], float]:
     """
     Обучение модели с механизмом Early Stopping.
-    
+
     Параметры:
     - pinn: объект PINN
     - x_collocation: точки коллокации
@@ -154,40 +162,40 @@ def _train_with_early_stopping(
     - patience: число эпох без улучшения до остановки
     - min_delta: минимальное изменение для учета как улучшения
     - monitor: имя метрики для мониторинга ('total_loss', 'pde', и т.д.)
-    
+
     Возвращает:
     - history: история обучения
     - training_time: время обучения в секундах
     """
-    import flax.nnx as nnx
-    
-    best_loss = float('inf')
+    from flax import nnx
+
+    best_loss = float("inf")
     epochs_without_improvement = 0
     best_state = None
-    
+
     history = {
-        'steps': [],
-        'total_loss': [],
-        'pde': [],
-        'bc_0': [],
-        'bc_1': [],
+        "steps": [],
+        "total_loss": [],
+        "pde": [],
+        "bc_0": [],
+        "bc_1": [],
     }
-    
+
     start_time = time.time()
-    
+
     for epoch in range(max_epochs):
         # Один шаг обучения
         losses = pinn.train_step(x_collocation, pde_fn, bc_fns, phys)
-        
-        current_loss = losses.get(monitor, losses['total_loss'])
-        
+
+        current_loss = losses.get(monitor, losses["total_loss"])
+
         # Сохранение истории
-        history['steps'].append(epoch)
-        history['total_loss'].append(float(losses['total_loss']))
-        history['pde'].append(float(losses['pde']))
-        history['bc_0'].append(float(losses['bc_0']))
-        history['bc_1'].append(float(losses['bc_1']))
-        
+        history["steps"].append(epoch)
+        history["total_loss"].append(float(losses["total_loss"]))
+        history["pde"].append(float(losses["pde"]))
+        history["bc_0"].append(float(losses["bc_0"]))
+        history["bc_1"].append(float(losses["bc_1"]))
+
         # Проверка улучшения
         if current_loss < best_loss - min_delta:
             best_loss = current_loss
@@ -196,86 +204,86 @@ def _train_with_early_stopping(
             best_state = nnx.state(pinn.net)
         else:
             epochs_without_improvement += 1
-        
+
         # Ранняя остановка
         if epochs_without_improvement >= patience:
             print(f"Early stopping на эпохе {epoch}. Лучшая потеря: {best_loss:.6f}")
             break
-    
+
     # Восстановление лучших весов
     if best_state is not None:
         nnx.update(pinn.net, best_state)
-    
+
     training_time = time.time() - start_time
-    
+
     return history, training_time
 
 
 def run_grid_search(
-    param_grid: Dict[str, List[Any]],
-    base_config: Optional[TrainConfig] = None,
-    phys: Optional[PhysicsParams] = None,
-    csv_path: str = 'csv_results/1D_line_robin_results.csv',
+    param_grid: dict[str, list[Any]],
+    base_config: TrainConfig | None = None,
+    phys: PhysicsParams | None = None,
+    csv_path: str = "csv_results/1D_line_robin_results.csv",
     pde_fn=None,
     exact_fn=None,
 ) -> pd.DataFrame:
     """
     Grid Search: перебор комбинаций гиперпараметров.
-    
+
     Параметры:
     - param_grid: словарь {имя_параметра: [список_значений]}
     - base_config: базовая конфигурация (если None, создается новая)
     - phys: физические параметры
     - csv_path: путь для сохранения результатов CSV
     - pde_fn, exact_fn: функции PDE и точного решения
-    
+
     Возвращает:
     - DataFrame с результатами всех экспериментов
     """
     import itertools
-    
+
     if base_config is None:
         base_config = TrainConfig()
-    
+
     if phys is None:
         phys = PhysicsParams()
-    
+
     # Генерация всех комбинаций параметров
     keys = list(param_grid.keys())
     values = [param_grid[k] for k in keys]
     combinations = list(itertools.product(*values))
-    
+
     results = []
     total_experiments = len(combinations)
-    
+
     print(f"Запуск Grid Search: {total_experiments} комбинаций")
-    
+
     for i, combo in enumerate(combinations, 1):
         print(f"Эксперимент {i}/{total_experiments}")
-        
+
         # Создание конфига для текущей комбинации
         config_dict = {
-            'hidden_features': base_config.hidden_features,
-            'num_layers': base_config.num_layers,
-            'activation_name': base_config.activation_name,
-            'opt_name': base_config.opt_name,
-            'lr': base_config.lr,
-            'max_epochs': base_config.max_epochs,
-            'patience': base_config.patience,
-            'min_delta': base_config.min_delta,
-            'num_points': base_config.num_points,
-            'weights': base_config.weights,
-            'save_img': False,
-            'show_plot': False,
+            "hidden_features": base_config.hidden_features,
+            "num_layers": base_config.num_layers,
+            "activation_name": base_config.activation_name,
+            "opt_name": base_config.opt_name,
+            "lr": base_config.lr,
+            "max_epochs": base_config.max_epochs,
+            "patience": base_config.patience,
+            "min_delta": base_config.min_delta,
+            "num_points": base_config.num_points,
+            "weights": base_config.weights,
+            "save_img": False,
+            "show_plot": False,
         }
-        
+
         # Применение текущей комбинации параметров
         for key, value in zip(keys, combo):
             if key in config_dict:
                 config_dict[key] = value
-        
+
         config = TrainConfig(**config_dict)
-        
+
         try:
             result, _ = run_experiment(
                 config=config,
@@ -287,13 +295,13 @@ def run_grid_search(
         except Exception as e:
             print(f"Ошибка в эксперименте {i}: {e}")
             continue
-    
+
     # Сохранение результатов
     if results:
         df_results = pd.DataFrame(results)
         os.makedirs(os.path.dirname(csv_path), exist_ok=True)
         header = not os.path.exists(csv_path)
-        df_results.to_csv(csv_path, mode='a', header=header, index=False)
+        df_results.to_csv(csv_path, mode="a", header=header, index=False)
         print(f"Результаты сохранены в {csv_path}")
         return df_results
     else:

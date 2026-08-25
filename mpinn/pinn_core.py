@@ -1,18 +1,35 @@
+"""Core PINN implementation using JAX and Flax NNX."""
+
+from __future__ import annotations
+
 import time
-import jax
-import flax.nnx as nnx
-from jax import grad, jit, vmap, random, value_and_grad
-import optax
 from functools import partial
-import matplotlib.pyplot as plt
+
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
+import optax
+from flax import nnx
+from jax import value_and_grad
+
 
 class FCNet(nnx.Module):
-    def __init__(self, din, dmid, dout, num_layers, activation, rngs: nnx.Rngs):
-        self.layers = nnx.List([
-            nnx.Linear(din if i == 0 else dmid, dmid, rngs=rngs) 
-            for i in range(num_layers)
-        ])
+    """Fully connected neural network for PINN."""
+
+    def __init__(
+        self,
+        din: int,
+        dmid: int,
+        dout: int,
+        num_layers: int,
+        activation,
+        rngs: nnx.Rngs,
+    ):
+        self.layers = nnx.List(
+            [
+                nnx.Linear(din if i == 0 else dmid, dmid, rngs=rngs)
+                for i in range(num_layers)
+            ]
+        )
         self.linear_out = nnx.Linear(dmid, dout, rngs=rngs)
         self.num_layers = num_layers
         self.activation = activation
@@ -23,7 +40,10 @@ class FCNet(nnx.Module):
             x = self.activation(x)
         return self.linear_out(x)
 
+
 class PINN:
+    """Physics-Informed Neural Network trainer."""
+
     def __init__(self, net: FCNet, opt, weights):
         self.net = net
         self.graphdef, self.params = nnx.split(net)
@@ -34,18 +54,18 @@ class PINN:
     def create_loss_fn(self, pde_fn, *bc_fns, phys):
         """
         Создает функцию потерь для обучения.
-        
-        Parameters:
-        -----------
+
+        Parameters
+        ----------
         pde_fn : callable
             Функция PDE.
         bc_fns : list
             Список функций граничных условий.
         phys : PhysicsParams
             Физические параметры.
-            
-        Returns:
-        --------
+
+        Returns
+        -------
         callable
             Функция потерь с атрибутами pde_fn, bc_fns, phys.
         """
@@ -55,13 +75,13 @@ class PINN:
         def total_loss(model, x_collocation):
             loss_pde = pde_bound(model, x_collocation)
             loss_bcs = [bc_b(model) for bc_b in bc_bounds]
-            
+
             total = self.weights[0] * loss_pde
             for w, l_bc in zip(self.weights[1:], loss_bcs):
                 total += w * l_bc
-                
+
             return total, (loss_pde, *loss_bcs)
-        
+
         # Сохраняем ссылки на исходные функции для train_step
         total_loss.pde_fn = pde_fn
         total_loss.bc_fns = bc_fns
@@ -71,9 +91,9 @@ class PINN:
     def train_step(self, x_collocation, pde_fn, bc_fns, phys):
         """
         Выполняет один шаг обучения.
-        
-        Parameters:
-        -----------
+
+        Parameters
+        ----------
         x_collocation : jax.Array
             Точки коллокации формы (n_points, 1).
         pde_fn : callable
@@ -82,139 +102,165 @@ class PINN:
             Список функций граничных условий.
         phys : PhysicsParams
             Физические параметры.
-            
-        Returns:
-        --------
+
+        Returns
+        -------
         dict
             Словарь с потерями: {'total_loss', 'pde', 'bc_0', 'bc_1'}.
         """
         # Создаем функцию потерь
         loss_fn = self.create_loss_fn(pde_fn, *bc_fns, phys=phys)
-        
+
         def closure(p):
             model = nnx.merge(self.graphdef, p)
             return loss_fn(model, x_collocation)
-            
-        (total_loss, aux_losses), grads = value_and_grad(closure, has_aux=True)(self.params)
+
+        (total_loss, aux_losses), grads = value_and_grad(closure, has_aux=True)(
+            self.params
+        )
         updates, new_opt_state = self.tx.update(grads, self.opt_state)
         self.params = optax.apply_updates(self.params, updates)
         self.opt_state = new_opt_state
-        
-        loss_names = ['pde'] + [f'bc_{i}' for i in range(len(bc_fns))]
-        losses = {'total_loss': float(total_loss)}
+
+        loss_names = ["pde"] + [f"bc_{i}" for i in range(len(bc_fns))]
+        losses = {"total_loss": float(total_loss)}
         for name, val in zip(loss_names, aux_losses):
             losses[name] = float(val)
-        
+
         return losses
 
-    def train_loop(self, x_collocation, num_steps, loss_fn, loss_names, log_interval=100):
-        history = {'steps': [], 'total_loss': []}
+    def train_loop(
+        self, x_collocation, num_steps, loss_fn, loss_names, log_interval=100
+    ):
+        """Training loop with logging."""
+        history = {"steps": [], "total_loss": []}
         for name in loss_names:
             history[name] = []
-            
+
         for step in range(num_steps):
-            losses = self.train_step(x_collocation, loss_fn.pde_fn, loss_fn.bc_fns, loss_fn.phys)
-                
+            losses = self.train_step(
+                x_collocation, loss_fn.pde_fn, loss_fn.bc_fns, loss_fn.phys
+            )
+
             if step % log_interval == 0 or step == num_steps - 1:
-                history['steps'].append(step)
-                history['total_loss'].append(losses['total_loss'])
+                history["steps"].append(step)
+                history["total_loss"].append(losses["total_loss"])
                 for name in loss_names:
-                    history[name].append(losses.get(name, losses['total_loss']))
-                    
+                    history[name].append(losses.get(name, losses["total_loss"]))
+
         return history
 
     def fit(self, x_collocation, pde_fn, bc_fns, phys, epochs):
+        """Fit the PINN model."""
         loss_fn = self.create_loss_fn(pde_fn, *bc_fns, phys=phys)
-        loss_names = ['pde'] + [f'bc_{i}' for i in range(len(bc_fns))]
-        
+        loss_names = ["pde"] + [f"bc_{i}" for i in range(len(bc_fns))]
+
         start_time = time.perf_counter()
         history = self.train_loop(x_collocation, epochs, loss_fn, loss_names=loss_names)
         end_time = time.perf_counter()
 
         training_time = end_time - start_time
-        
+
         return history, training_time
 
     def predict(self, x_test):
+        """Make predictions with the trained model."""
         model = nnx.merge(self.graphdef, self.params)
         return model(x_test)
 
     def compute_metrics(self, x_test, T_pred, T_exact):
+        """Compute error metrics between prediction and exact solution."""
         diff = T_pred - T_exact
-        mse = float(jnp.mean(diff ** 2))
+        mse = float(jnp.mean(diff**2))
         mae = float(jnp.mean(jnp.abs(diff)))
         rmse = float(jnp.sqrt(mse))
         max_error = float(jnp.max(jnp.abs(diff)))
         mape = float(jnp.mean(jnp.abs(diff / (jnp.abs(T_exact) + 1e-8))))
         return {
-            'mape': f'{mape:.4e}', 'mae': f'{mae:.4e}', 'mse': f'{mse:.4e}',
-            'rmse': f'{rmse:.4e}', 'max_error': f'{max_error:.4e}'
+            "mape": f"{mape:.4e}",
+            "mae": f"{mae:.4e}",
+            "mse": f"{mse:.4e}",
+            "rmse": f"{rmse:.4e}",
+            "max_error": f"{max_error:.4e}",
         }
 
     def evaluate(self, x_test, exact_fn, phys, bc_names=None):
+        """Evaluate model against exact solution."""
         T_pred = self.predict(x_test).ravel()
         T_exact = exact_fn(x_test.ravel(), phys)
         metrics = self.compute_metrics(x_test, T_pred, T_exact)
         if bc_names:
-            metrics['bc_left'] = bc_names[0]
-            metrics['bc_right'] = bc_names[1] if len(bc_names) > 1 else bc_names[0]
+            metrics["bc_left"] = bc_names[0]
+            metrics["bc_right"] = bc_names[1] if len(bc_names) > 1 else bc_names[0]
         return metrics, T_pred, T_exact
 
     def save_plot(self, x_test, T_pred, T_exact, phys, save_path):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(x_test.ravel(), T_exact, 'b-', label='Аналитическое решение', linewidth=2)
-        ax.plot(x_test.ravel(), T_pred, 'r:', label='ФИНС', linewidth=6)
-        ax.set_xlabel('x, м')
-        ax.set_ylabel('T, К')
+        """Save comparison plot to file."""
+        _fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(
+            x_test.ravel(), T_exact, "b-", label="Аналитическое решение", linewidth=2
+        )
+        ax.plot(x_test.ravel(), T_pred, "r:", label="ФИНС", linewidth=6)
+        ax.set_xlabel("x, м")
+        ax.set_ylabel("T, К")
         ax.legend(fontsize=14)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(save_path, dpi=72, bbox_inches='tight')
+        plt.savefig(save_path, dpi=72, bbox_inches="tight")
         plt.close()
 
     def show_plot(self, x_test, T_pred, T_exact, phys):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(x_test.ravel(), T_exact, 'b-', label='Аналитическое решение', linewidth=2)
-        ax.plot(x_test.ravel(), T_pred, 'r:', label='ФИНС', linewidth=6)
-        ax.set_xlabel('x, м')
-        ax.set_ylabel('T, К')
+        """Display comparison plot."""
+        _fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(
+            x_test.ravel(), T_exact, "b-", label="Аналитическое решение", linewidth=2
+        )
+        ax.plot(x_test.ravel(), T_pred, "r:", label="ФИНС", linewidth=6)
+        ax.set_xlabel("x, м")
+        ax.set_ylabel("T, К")
         ax.legend(fontsize=14)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.show()
 
+
 def normalize(data, min_val, max_val):
     """
-    нормализация данных к диапазону [0, 1].
-    Parameters:
-    -----------
-    data : jax.Array или float
+    Нормализация данных к диапазону [0, 1].
+
+    Parameters
+    ----------
+    data : jax.Array | float
         Исходные данные.
     min_val : float
         Минимальное значение диапазона.
     max_val : float
         Максимальное значение диапазона.
-    Returns:
-    --------
-    jax.Array или float
+
+    Returns
+    -------
+    jax.Array | float
         Нормализованные данные в диапазоне [0, 1].
     """
     return (data - min_val) / (max_val - min_val)
 
+
 def denormalize(data_norm, min_val, max_val):
     """
-    денормализация данных из диапазона [0, 1] обратно в исходный диапазон.
-    Parameters:
-    -----------
-    data_norm : jax.Array или float
+    Денормализация данных из диапазона [0, 1] обратно в исходный диапазон.
+
+    Parameters
+    ----------
+    data_norm : jax.Array | float
         Нормализованные данные в диапазоне [0, 1].
     min_val : float
         Минимальное значение исходного диапазона.
     max_val : float
         Максимальное значение исходного диапазона.
-    Returns:
-    --------
-    jax.Array или float
+
+    Returns
+    -------
+    jax.Array | float
         Восстановленные физические данные.
     """
     return data_norm * (max_val - min_val) + min_val

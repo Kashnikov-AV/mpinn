@@ -6,23 +6,21 @@ This module provides a flexible framework for balancing different loss component
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional
-import jax.numpy as jnp
-from flax import nnx
+from typing import Any
 
 
 class BaseWeightStrategy(ABC):
     """
     Abstract base class for loss weight strategies.
-    
+
     Strategies define how to compute weights for different loss components
     before aggregating them into a total loss for optimization.
     """
-    
-    def __init__(self, initial_weights: Optional[Dict[str, float]] = None):
+
+    def __init__(self, initial_weights: dict[str, float] | None = None):
         """
         Initialize the strategy.
-        
+
         Args:
             initial_weights: Optional dictionary of initial weights for loss components.
                              Keys should match loss names (e.g., 'pde', 'bc_dirichlet', 'interface').
@@ -32,23 +30,22 @@ class BaseWeightStrategy(ABC):
 
     @abstractmethod
     def compute_weights(
-        self, 
-        losses: Dict[str, Dict[str, float]], 
-        step: int, 
-        model_state: Optional[Any] = None
-    ) -> Dict[str, Dict[str, float]]:
+        self,
+        losses: dict[str, dict[str, float]],
+        step: int,
+        model_state: Any | None = None,
+    ) -> dict[str, dict[str, float]]:
         """
         Compute weights for the current training step.
-        
+
         Args:
             losses: Nested dictionary of raw losses {domain_name: {loss_type: value}}.
             step: Current training step.
             model_state: Optional model state (parameters, gradients) for gradient-based strategies.
-            
+
         Returns:
             Dictionary of weights {domain_name: {loss_type: weight}}.
         """
-        pass
 
     def reset(self):
         """Reset internal state of the strategy."""
@@ -58,22 +55,22 @@ class BaseWeightStrategy(ABC):
 class FixedWeightStrategy(BaseWeightStrategy):
     """
     Strategy using fixed, user-defined weights.
-    
+
     This is the default behavior where weights do not change during training.
     """
-    
+
     def compute_weights(
-        self, 
-        losses: Dict[str, Dict[str, float]], 
-        step: int, 
-        model_state: Optional[Any] = None
-    ) -> Dict[str, Dict[str, float]]:
+        self,
+        losses: dict[str, dict[str, float]],
+        step: int,
+        model_state: Any | None = None,
+    ) -> dict[str, dict[str, float]]:
         # Return initial weights for all domains and loss types
         # If specific weights are missing, default to 1.0
         weights = {}
         for domain, domain_losses in losses.items():
             weights[domain] = {}
-            for loss_name in domain_losses.keys():
+            for loss_name in domain_losses:
                 key = f"{domain}_{loss_name}"
                 weights[domain][loss_name] = self.initial_weights.get(key, 1.0)
         return weights
@@ -82,17 +79,17 @@ class FixedWeightStrategy(BaseWeightStrategy):
 class GradNormStrategy(BaseWeightStrategy):
     """
     Gradient Normalization strategy (placeholder).
-    
+
     Dynamically adjusts weights to balance gradient norms across tasks.
     See: Chen et al., "GradNorm: Gradient Normalization for Adaptive Loss Balancing in Deep Multitask Networks"
     """
-    
+
     def compute_weights(
-        self, 
-        losses: Dict[str, Dict[str, float]], 
-        step: int, 
-        model_state: Optional[Any] = None
-    ) -> Dict[str, Dict[str, float]]:
+        self,
+        losses: dict[str, dict[str, float]],
+        step: int,
+        model_state: Any | None = None,
+    ) -> dict[str, dict[str, float]]:
         # TODO: Implement GradNorm logic
         # Requires access to gradients of each loss w.r.t shared parameters
         pass
@@ -101,16 +98,16 @@ class GradNormStrategy(BaseWeightStrategy):
 class ResidualBasedStrategy(BaseWeightStrategy):
     """
     Residual-based adaptive weighting (placeholder).
-    
+
     Adjusts weights based on the magnitude of residuals to focus on harder constraints.
     """
-    
+
     def compute_weights(
-        self, 
-        losses: Dict[str, Dict[str, float]], 
-        step: int, 
-        model_state: Optional[Any] = None
-    ) -> Dict[str, Dict[str, float]]:
+        self,
+        losses: dict[str, dict[str, float]],
+        step: int,
+        model_state: Any | None = None,
+    ) -> dict[str, dict[str, float]]:
         # TODO: Implement residual-based logic
         pass
 
@@ -118,21 +115,20 @@ class ResidualBasedStrategy(BaseWeightStrategy):
 class UncertaintyWeightingStrategy(BaseWeightStrategy):
     """
     Homoscedastic Uncertainty Weighting (placeholder).
-    
+
     Learns log-variance parameters to weight losses automatically.
     See: Kendall & Gal, "Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics"
     """
-    
-    def __init__(self, initial_weights: Optional[Dict[str, float]] = None):
+
+    def __init__(self, initial_weights: dict[str, float] | None = None):
         super().__init__(initial_weights)
         # TODO: Initialize learnable log-variance parameters
-        pass
 
     def compute_weights(
-        self, 
-        losses: Dict[str, Dict[str, float]], 
-        step: int, 
-        model_state: Optional[Any] = None
-    ) -> Dict[str, Dict[str, float]]:
+        self,
+        losses: dict[str, dict[str, float]],
+        step: int,
+        model_state: Any | None = None,
+    ) -> dict[str, dict[str, float]]:
         # TODO: Implement uncertainty weighting logic
         pass
