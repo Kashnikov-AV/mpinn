@@ -257,58 +257,6 @@ class Rectangle(Geometry):
         return jnp.vstack([interior, boundary])
 
 
-class Circle(Geometry):
-    """
-    Двумерный круг с центром в (cx, cy) и радиусом R
-    """
-
-    def __init__(self, cx=0.0, cy=0.0, radius=1.0):
-        super().__init__(dim=2)
-        self.cx = float(cx)
-        self.cy = float(cy)
-        self.radius = float(radius)
-
-    def sample_interior(self, n_points, method='random', rng=None):
-        """Генерирует точки внутри круга"""
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-
-        if method == 'random':
-            keys = jax.random.split(rng, 2)
-            # Равномерное распределение в круге через полярные координаты
-            r = self.radius * jnp.sqrt(jax.random.uniform(keys[0], (n_points, 1)))
-            theta = 2 * jnp.pi * jax.random.uniform(keys[1], (n_points, 1))
-            x = self.cx + r * jnp.cos(theta)
-            y = self.cy + r * jnp.sin(theta)
-            return jnp.hstack([x, y])
-        
-        raise ValueError(f'Unknown method: {method}')
-
-    def sample_boundary(self, n_points=100, method='random', rng=None):
-        """Генерирует точки на окружности"""
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-
-        if method == 'random':
-            theta = 2 * jnp.pi * jax.random.uniform(rng, (n_points, 1))
-            x = self.cx + self.radius * jnp.cos(theta)
-            y = self.cy + self.radius * jnp.sin(theta)
-            return jnp.hstack([x, y])
-        
-        raise ValueError(f'Unknown method: {method}')
-
-    def generate_collocation(self, n_interior=100, n_boundary=50,
-                             method_interior='random', method_boundary='random',
-                             rng=None):
-        """Генерирует внутренние и граничные точки"""
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-        keys = jax.random.split(rng, 2)
-        interior = self.sample_interior(n_interior, method_interior, keys[0])
-        boundary = self.sample_boundary(n_boundary, method_boundary, keys[1])
-        return jnp.vstack([interior, boundary])
-
-
 class Box(Geometry):
     """
     Трехмерный параллелепипед x_min..x_max × y_min..y_max × z_min..z_max

@@ -11,10 +11,10 @@ import jax.numpy as jnp
 @dataclass(frozen=True)
 class PhysicsParams:
     """Физические параметры задачи."""
-    x_left:  float = None
-    x_right: float = None
-    T_left:  float = None
-    T_inf:   float = None
+    x1:  float = None
+    x0: float = None
+    T0:  float = None
+    T1:   float = None
     _lambda: float = None
     h:       float = None
     source_fn: Callable = None  # Функция источника тепла f(x), по умолчанию нет источника

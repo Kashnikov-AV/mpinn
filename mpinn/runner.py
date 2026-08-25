@@ -15,7 +15,7 @@ from .pinn_core import PINN, FCNet
 from .bc import dirichlet_bc, robin_bc
 from mpinn.config import PhysicsParams, TrainConfig, get_activation, get_optimizer
 from mpinn.plotting import show_plot, save_plot
-
+from flax import nnx
 
 def run_experiment(
     config: TrainConfig,
