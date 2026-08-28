@@ -19,7 +19,7 @@ from .geom import Interval
 from .pinn_core import PINN, FCNet
 
 
-def run_experiment(
+def run_experiment_1D(
     config: TrainConfig,
     phys: PhysicsParams | None = None,
     pde_fn=None,

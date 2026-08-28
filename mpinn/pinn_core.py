@@ -6,6 +6,7 @@ import time
 from functools import partial
 
 import jax.numpy as jnp
+import jax
 import matplotlib.pyplot as plt
 import optax
 from flax import nnx
@@ -45,128 +46,58 @@ class PINN:
     """Physics-Informed Neural Network trainer."""
 
     def __init__(self, net: FCNet, opt, weights):
-        self.net = net
-        self.graphdef, self.params = nnx.split(net)
-        self.tx = opt
-        self.opt_state = self.tx.init(self.params)
+        self.optimizer = nnx.Optimizer(net, opt)   # инкапсулирует модель и состояние
         self.weights = weights
 
-    def create_loss_fn(self, pde_fn, *bc_fns, phys):
-        """
-        Создает функцию потерь для обучения.
-
-        Parameters
-        ----------
-        pde_fn : callable
-            Функция PDE.
-        bc_fns : list
-            Список функций граничных условий.
-        phys : PhysicsParams
-            Физические параметры.
-
-        Returns
-        -------
-        callable
-            Функция потерь с атрибутами pde_fn, bc_fns, phys.
-        """
-        pde_bound = partial(pde_fn, phys=phys)
-        bc_bounds = list(bc_fns)
-
+    def create_loss_fn(self, pde_fn, bc_fns, phys):
+        """Возвращает функцию total_loss(model, x_collocation) -> (total, aux)."""
         def total_loss(model, x_collocation):
-            loss_pde = pde_bound(model, x_collocation)
-            loss_bcs = [bc_b(model) for bc_b in bc_bounds]
-
+            loss_pde = pde_fn(model, x_collocation, phys)
+            loss_bcs = [bc_fn(model) for bc_fn in bc_fns]
             total = self.weights[0] * loss_pde
             for w, l_bc in zip(self.weights[1:], loss_bcs):
                 total += w * l_bc
-
             return total, (loss_pde, *loss_bcs)
-
-        # Сохраняем ссылки на исходные функции для train_step
-        total_loss.pde_fn = pde_fn
-        total_loss.bc_fns = bc_fns
-        total_loss.phys = phys
         return total_loss
 
+    @nnx.jit
     def train_step(self, x_collocation, pde_fn, bc_fns, phys):
-        """
-        Выполняет один шаг обучения.
-
-        Parameters
-        ----------
-        x_collocation : jax.Array
-            Точки коллокации формы (n_points, 1).
-        pde_fn : callable
-            Функция PDE.
-        bc_fns : list
-            Список функций граничных условий.
-        phys : PhysicsParams
-            Физические параметры.
-
-        Returns
-        -------
-        dict
-            Словарь с потерями: {'total_loss', 'pde', 'bc_0', 'bc_1'}.
-        """
-        # Создаем функцию потерь
-        loss_fn = self.create_loss_fn(pde_fn, *bc_fns, phys=phys)
-
-        def closure(p):
-            model = nnx.merge(self.graphdef, p)
+        loss_fn = self.create_loss_fn(pde_fn, bc_fns, phys)
+        def loss_and_aux(model):
             return loss_fn(model, x_collocation)
 
-        (total_loss, aux_losses), grads = value_and_grad(closure, has_aux=True)(
-            self.params
-        )
-        updates, new_opt_state = self.tx.update(grads, self.opt_state)
-        self.params = optax.apply_updates(self.params, updates)
-        self.opt_state = new_opt_state
+        (total, aux), grads = nnx.value_and_grad(loss_and_aux, has_aux=True)(self.optimizer.model)
+        self.optimizer.update(grads)
 
-        loss_names = ["pde"] + [f"bc_{i}" for i in range(len(bc_fns))]
-        losses = {"total_loss": float(total_loss)}
-        for name, val in zip(loss_names, aux_losses):
-            losses[name] = float(val)
-
+        losses = {"total_loss": float(total)}
+        losses["pde"] = float(aux[0])
+        for i, val in enumerate(aux[1:], start=1):
+            losses[f"bc_{i-1}"] = float(val)   # или более осмысленные имена
         return losses
 
-    def train_loop(
-        self, x_collocation, num_steps, loss_fn, loss_names, log_interval=100
-    ):
-        """Training loop with logging."""
+    def train_loop(self, x_collocation, pde_fn, bc_fns, phys, num_steps, log_interval=100):
+        loss_names = ["pde"] + [f"bc_{i}" for i in range(len(bc_fns))]
         history = {"steps": [], "total_loss": []}
         for name in loss_names:
             history[name] = []
 
         for step in range(num_steps):
-            losses = self.train_step(
-                x_collocation, loss_fn.pde_fn, loss_fn.bc_fns, loss_fn.phys
-            )
-
+            losses = self.train_step(x_collocation, pde_fn, bc_fns, phys)
             if step % log_interval == 0 or step == num_steps - 1:
                 history["steps"].append(step)
                 history["total_loss"].append(losses["total_loss"])
                 for name in loss_names:
                     history[name].append(losses.get(name, losses["total_loss"]))
-
         return history
 
     def fit(self, x_collocation, pde_fn, bc_fns, phys, epochs):
-        """Fit the PINN model."""
-        loss_fn = self.create_loss_fn(pde_fn, *bc_fns, phys=phys)
-        loss_names = ["pde"] + [f"bc_{i}" for i in range(len(bc_fns))]
-
         start_time = time.perf_counter()
-        history = self.train_loop(x_collocation, epochs, loss_fn, loss_names=loss_names)
+        history = self.train_loop(x_collocation, pde_fn, bc_fns, phys, epochs)
         end_time = time.perf_counter()
-
-        training_time = end_time - start_time
-
-        return history, training_time
+        return history, end_time - start_time
 
     def predict(self, x_test):
-        """Make predictions with the trained model."""
-        model = nnx.merge(self.graphdef, self.params)
-        return model(x_test)
+        return self.optimizer.model(x_test)
 
     def compute_metrics(self, x_test, T_pred, T_exact):
         """Compute error metrics between prediction and exact solution."""
