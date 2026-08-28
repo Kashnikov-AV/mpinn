@@ -27,7 +27,7 @@ def run_experiment_1D(
     bc_fns_override: list | None = None,
 ) -> tuple[dict[str, Any], dict[str, list[float]]]:
     """
-    Запуск одного эксперимента с Early Stopping.
+    Запуск одного эксперимента. Поддерживает режимы с Early Stopping и без.
 
     Параметры:
     - config: конфигурация обучения
@@ -83,18 +83,30 @@ def run_experiment_1D(
             ),
         ]
 
-    # Обучение с Early Stopping
-    history, training_time = _train_with_early_stopping(
-        pinn=pinn,
-        x_collocation=x_collocation,
-        pde_fn=pde_fn,
-        bc_fns=bc_fns,
-        phys=phys,
-        max_epochs=config.max_epochs,
-        patience=config.patience,
-        min_delta=config.min_delta,
-        monitor=config.monitor,
-    )
+    # Выбор режима обучения
+    if config.use_early_stopping:
+        # Обучение с Early Stopping
+        history, training_time = _train_with_early_stopping(
+            pinn=pinn,
+            x_collocation=x_collocation,
+            pde_fn=pde_fn,
+            bc_fns=bc_fns,
+            phys=phys,
+            max_epochs=config.max_epochs,
+            patience=config.patience,
+            min_delta=config.min_delta,
+            monitor=config.monitor,
+        )
+    else:
+        # Обучение без Early Stopping (фиксированное число эпох)
+        history, training_time = _train_without_early_stopping(
+            pinn=pinn,
+            x_collocation=x_collocation,
+            pde_fn=pde_fn,
+            bc_fns=bc_fns,
+            phys=phys,
+            max_epochs=config.max_epochs,
+        )
 
     # Верификация
     x_test = jnp.linspace(phys.x0, phys.x1, 100).reshape(-1, 1)
@@ -219,6 +231,55 @@ def _train_with_early_stopping(
     return history, training_time
 
 
+def _train_without_early_stopping(
+    pinn: PINN,
+    x_collocation: jnp.ndarray,
+    pde_fn,
+    bc_fns: list,
+    phys: PhysicsParams,
+    max_epochs: int,
+) -> tuple[dict[str, list[float]], float]:
+    """
+    Обучение модели без Early Stopping на фиксированное количество эпох.
+
+    Параметры:
+    - pinn: объект PINN
+    - x_collocation: точки коллокации
+    - pde_fn: функция PDE
+    - bc_fns: список функций граничных условий
+    - phys: физические параметры
+    - max_epochs: фиксированное число эпох для обучения
+
+    Возвращает:
+    - history: история обучения
+    - training_time: время обучения в секундах
+    """
+    history = {
+        "steps": [],
+        "total_loss": [],
+        "pde": [],
+        "bc_0": [],
+        "bc_1": [],
+    }
+
+    start_time = time.time()
+
+    for epoch in range(max_epochs):
+        # Один шаг обучения
+        losses = pinn.train_step(x_collocation, pde_fn, bc_fns, phys)
+
+        # Сохранение истории
+        history["steps"].append(epoch)
+        history["total_loss"].append(float(losses["total_loss"]))
+        history["pde"].append(float(losses["pde"]))
+        history["bc_0"].append(float(losses["bc_0"]))
+        history["bc_1"].append(float(losses["bc_1"]))
+
+    training_time = time.time() - start_time
+
+    return history, training_time
+
+
 def run_grid_search(
     param_grid: dict[str, list[Any]],
     base_config: TrainConfig | None = None,
@@ -226,6 +287,7 @@ def run_grid_search(
     csv_path: str = "csv_results/1D_line_robin_results.csv",
     pde_fn=None,
     exact_fn=None,
+    use_early_stopping: bool = True,
 ) -> pd.DataFrame:
     """
     Grid Search: перебор комбинаций гиперпараметров.
@@ -236,6 +298,7 @@ def run_grid_search(
     - phys: физические параметры
     - csv_path: путь для сохранения результатов CSV
     - pde_fn, exact_fn: функции PDE и точного решения
+    - use_early_stopping: использовать ли раннюю остановку (по умолчанию True)
 
     Возвращает:
     - DataFrame с результатами всех экспериментов
@@ -271,6 +334,7 @@ def run_grid_search(
             "max_epochs": base_config.max_epochs,
             "patience": base_config.patience,
             "min_delta": base_config.min_delta,
+            "use_early_stopping": use_early_stopping,
             "num_points": base_config.num_points,
             "weights": base_config.weights,
             "save_img": False,
@@ -285,7 +349,7 @@ def run_grid_search(
         config = TrainConfig(**config_dict)
 
         try:
-            result, _ = run_experiment(
+            result, _ = run_experiment_1D(
                 config=config,
                 phys=phys,
                 pde_fn=pde_fn,

@@ -2,7 +2,7 @@
 
 ## Обзор
 
-Модуль `runner.py` предоставляет высокоуровневый API для запуска экспериментов с PINN, включая обучение с Early Stopping и Grid Search гиперпараметров.
+Модуль `runner.py` предоставляет высокоуровневый API для запуска экспериментов с PINN, включая обучение с Early Stopping и без него, а также Grid Search гиперпараметров.
 
 ## Зависимости
 
@@ -15,10 +15,10 @@
 
 ## Функции
 
-### run_experiment
+### run_experiment_1D
 
 ```python
-run_experiment(
+run_experiment_1D(
     config: TrainConfig,
     phys: Optional[PhysicsParams] = None,
     pde_fn=None,
@@ -27,7 +27,7 @@ run_experiment(
 ) -> Tuple[Dict[str, Any], Dict[str, List[float]]]
 ```
 
-Запуск одного эксперимента с механизмом Early Stopping.
+Запуск одного эксперимента. Поддерживает режимы с Early Stopping и без (контролируется параметром `use_early_stopping` в конфиге).
 
 **Параметры:**
 
@@ -47,11 +47,11 @@ run_experiment(
 **Пример:**
 
 ```python
-from mpinn.runner import run_experiment
+from mpinn.runner import run_experiment_1D
 from mpinn.config import TrainConfig, PhysicsParams
 
-# Конфигурация
-config = TrainConfig(
+# Конфигурация с Early Stopping (по умолчанию)
+config_es = TrainConfig(
     hidden_features=64,
     num_layers=2,
     activation_name='GELU',
@@ -60,8 +60,17 @@ config = TrainConfig(
     patience=200,
     num_points=100,
     weights=(1.0, 1.0, 1.0),
-    save_img=True,
-    image_path='results/solution.png'
+    use_early_stopping=True  # Включить Early Stopping
+)
+
+# Конфигурация без Early Stopping (фиксированное число эпох)
+config_fixed = TrainConfig(
+    hidden_features=64,
+    num_layers=2,
+    activation_name='GELU',
+    lr=0.01,
+    max_epochs=3000,
+    use_early_stopping=False  # Отключить Early Stopping
 )
 
 phys = PhysicsParams(
@@ -74,7 +83,7 @@ phys = PhysicsParams(
 )
 
 # Запуск эксперимента
-metrics, history = run_experiment(config=config, phys=phys)
+metrics, history = run_experiment_1D(config=config_es, phys=phys)
 
 print(f"MSE: {metrics['mse']}, MAE: {metrics['mae']}")
 print(f"Обучено эпох: {metrics['epochs_trained']}, Время: {metrics['training_time']}c")
@@ -91,11 +100,12 @@ run_grid_search(
     phys: Optional[PhysicsParams] = None,
     csv_path: str = 'csv_results/1D_line_robin_results.csv',
     pde_fn=None,
-    exact_fn=None
+    exact_fn=None,
+    use_early_stopping: bool = True
 ) -> pd.DataFrame
 ```
 
-Grid Search: автоматический перебор комбинаций гиперпараметров.
+Grid Search: автоматический перебор комбинаций гиперпараметров с возможностью выбора режима обучения.
 
 **Параметры:**
 
@@ -107,6 +117,7 @@ Grid Search: автоматический перебор комбинаций г
 | `csv_path` | str | Путь для сохранения результатов CSV |
 | `pde_fn` | callable | Функция PDE |
 | `exact_fn` | callable | Функция точного решения |
+| `use_early_stopping` | bool | Использовать ли раннюю остановку (по умолчанию True) |
 
 **Возвращает:**
 
@@ -142,12 +153,22 @@ phys = PhysicsParams(
     h=10.0
 )
 
-# Запуск Grid Search
-df_results = run_grid_search(
+# Запуск Grid Search с Early Stopping (по умолчанию)
+df_results_es = run_grid_search(
     param_grid=param_grid,
     base_config=base_config,
     phys=phys,
-    csv_path='results/grid_search.csv'
+    csv_path='results/grid_search_es.csv',
+    use_early_stopping=True  # С ранней остановкой
+)
+
+# Запуск Grid Search без Early Stopping (фиксированное число эпох)
+df_results_fixed = run_grid_search(
+    param_grid=param_grid,
+    base_config=base_config,
+    phys=phys,
+    csv_path='results/grid_search_fixed.csv',
+    use_early_stopping=False  # Без ранней остановки
 )
 
 # Анализ результатов
@@ -199,9 +220,44 @@ _train_with_early_stopping(
 
 ---
 
-## Механизм Early Stopping
+### _train_without_early_stopping (внутренняя)
 
-Функция `run_experiment` использует Early Stopping для предотвращения переобучения:
+```python
+_train_without_early_stopping(
+    pinn: PINN,
+    x_collocation: jnp.ndarray,
+    pde_fn,
+    bc_fns: List,
+    phys: PhysicsParams,
+    max_epochs: int
+) -> Tuple[Dict[str, List[float]], float]
+```
+
+Обучение модели без Early Stopping на фиксированное количество эпох.
+
+**Параметры:**
+
+| Параметр | Тип | Описание |
+|----------|-----|----------|
+| `pinn` | PINN | Объект PINN |
+| `x_collocation` | jnp.ndarray | Точки коллокации |
+| `pde_fn` | callable | Функция PDE |
+| `bc_fns` | List[callable] | Список функций граничных условий |
+| `phys` | PhysicsParams | Физические параметры |
+| `max_epochs` | int | Фиксированное число эпох для обучения |
+
+**Возвращает:**
+
+- `history` — история обучения
+- `training_time` — время обучения в секундах
+
+---
+
+## Режимы обучения
+
+### Early Stopping (по умолчанию)
+
+Функция `run_experiment_1D` использует Early Stopping для предотвращения переобучения:
 
 1. **Мониторинг метрики**: Отслеживается метрика `monitor` (по умолчанию `total_loss`)
 2. **Patience**: Обучение останавливается, если метрика не улучшается в течение `patience` эпох
@@ -215,7 +271,24 @@ config = TrainConfig(
     max_epochs=10000,      # Максимум 10000 эпох
     patience=500,          # Остановка после 500 эпох без улучшения
     min_delta=1e-6,        # Минимальное улучшение 1e-6
-    monitor='total_loss'   # Мониторим общую потерю
+    monitor='total_loss',  # Мониторим общую потерю
+    use_early_stopping=True  # Включить Early Stopping
+)
+```
+
+### Фиксированное число эпох (без Early Stopping)
+
+Обучение проходит все `max_epochs` без проверки улучшений. Полезно для:
+- Сравнения различных архитектур при одинаковом бюджете эпох
+- Исследований динамики обучения
+- Grid Search с контролируемым временем выполнения
+
+**Пример:**
+
+```python
+config = TrainConfig(
+    max_epochs=3000,       # Ровно 3000 эпох
+    use_early_stopping=False  # Отключить Early Stopping
 )
 ```
 
@@ -249,13 +322,13 @@ config = TrainConfig(
 ## Полный пример использования
 
 ```python
-from mpinn.runner import run_experiment, run_grid_search
+from mpinn.runner import run_experiment_1D, run_grid_search
 from mpinn.config import TrainConfig, PhysicsParams
 from mpinn.pde import line_1d
 from mpinn.analytic import line_1d_robin_exact
 import pandas as pd
 
-# === Пример 1: Одиночный эксперимент ===
+# === Пример 1: Одиночный эксперимент с Early Stopping ===
 
 phys = PhysicsParams(
     x0=0.0,
@@ -266,7 +339,7 @@ phys = PhysicsParams(
     h=10.0
 )
 
-config = TrainConfig(
+config_es = TrainConfig(
     hidden_features=64,
     num_layers=2,
     activation_name='GELU',
@@ -275,19 +348,20 @@ config = TrainConfig(
     patience=200,
     num_points=100,
     weights=(1.0, 1.0, 1.0),
+    use_early_stopping=True,
     save_img=True,
     show_plot=False,
-    image_path='results/single_experiment.png'
+    image_path='results/single_experiment_es.png'
 )
 
-metrics, history = run_experiment(
-    config=config,
+metrics, history = run_experiment_1D(
+    config=config_es,
     phys=phys,
     pde_fn=line_1d,
     exact_fn=line_1d_robin_exact
 )
 
-print(f"\n=== Результаты эксперимента ===")
+print(f"\n=== Результаты эксперимента (Early Stopping) ===")
 print(f"MSE: {metrics['mse']:.6e}")
 print(f"MAE: {metrics['mae']:.6e}")
 print(f"RMSE: {metrics['rmse']:.6e}")
@@ -295,7 +369,34 @@ print(f"Эпох: {metrics['epochs_trained']}")
 print(f"Время: {metrics['training_time']}c")
 
 
-# === Пример 2: Grid Search ===
+# === Пример 2: Одиночный эксперимент без Early Stopping ===
+
+config_fixed = TrainConfig(
+    hidden_features=64,
+    num_layers=2,
+    activation_name='GELU',
+    lr=0.01,
+    max_epochs=3000,
+    num_points=100,
+    weights=(1.0, 1.0, 1.0),
+    use_early_stopping=False,  # Фиксированное число эпох
+    save_img=True,
+    image_path='results/single_experiment_fixed.png'
+)
+
+metrics, history = run_experiment_1D(
+    config=config_fixed,
+    phys=phys,
+    pde_fn=line_1d,
+    exact_fn=line_1d_robin_exact
+)
+
+print(f"\n=== Результаты эксперимента (фиксированные эпохи) ===")
+print(f"MSE: {metrics['mse']:.6e}")
+print(f"Эпох: {metrics['epochs_trained']}")
+
+
+# === Пример 3: Grid Search с выбором режима ===
 
 param_grid = {
     'hidden_features': [32, 64],
@@ -310,25 +411,33 @@ base_config = TrainConfig(
     num_points=80
 )
 
-df_results = run_grid_search(
+# Grid Search с Early Stopping
+df_results_es = run_grid_search(
     param_grid=param_grid,
     base_config=base_config,
     phys=phys,
     pde_fn=line_1d,
     exact_fn=line_1d_robin_exact,
-    csv_path='results/grid_search_results.csv'
+    csv_path='results/grid_search_es.csv',
+    use_early_stopping=True
 )
 
-# Анализ лучших результатов
-if not df_results.empty:
-    best_idx = df_results['mse'].idxmin()
-    best_row = df_results.loc[best_idx]
-    
-    print(f"\n=== Лучшая конфигурация ===")
-    print(f"Слои: {best_row['layers']}, Нейроны: {best_row['neurons']}")
-    print(f"Активация: {best_row['activation_func']}")
-    print(f"LR: {best_row['lr']}")
-    print(f"MSE: {best_row['mse']:.6e}")
+# Grid Search без Early Stopping
+df_results_fixed = run_grid_search(
+    param_grid=param_grid,
+    base_config=base_config,
+    phys=phys,
+    pde_fn=line_1d,
+    exact_fn=line_1d_robin_exact,
+    csv_path='results/grid_search_fixed.csv',
+    use_early_stopping=False
+)
+
+# Сравнение результатов
+if not df_results_es.empty and not df_results_fixed.empty:
+    print(f"\n=== Сравнение режимов обучения ===")
+    print(f"Early Stopping - лучший MSE: {df_results_es['mse'].min():.6e}")
+    print(f"Фиксированные эпохи - лучший MSE: {df_results_fixed['mse'].min():.6e}")
 ```
 
 ---
@@ -355,14 +464,36 @@ param_grid = {
 config_debug = TrainConfig(
     max_epochs=500,
     patience=50,
-    min_delta=1e-4
+    min_delta=1e-4,
+    use_early_stopping=True
 )
 
 # Для финального обучения
 config_final = TrainConfig(
     max_epochs=10000,
     patience=500,
-    min_delta=1e-7
+    min_delta=1e-7,
+    use_early_stopping=True
+)
+```
+
+### Grid Search: когда использовать каждый режим
+
+```python
+# Early Stopping - для поиска лучшей конфигурации
+# (экономит время, останавливая неперспективные варианты)
+df_best = run_grid_search(
+    param_grid=param_grid,
+    base_config=base_config,
+    use_early_stopping=True
+)
+
+# Фиксированные эпохи - для честного сравнения архитектур
+# (все модели обучаются одинаковое число эпох)
+df_compare = run_grid_search(
+    param_grid=param_grid,
+    base_config=base_config,
+    use_early_stopping=False
 )
 ```
 

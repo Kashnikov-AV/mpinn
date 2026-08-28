@@ -103,6 +103,7 @@ gamma = phys.gamma   # 5000.0
 | `patience` | int | Число эпох без улучшения до Early Stopping | 200 |
 | `min_delta` | float | Минимальное изменение для учета как улучшения | 1e-6 |
 | `monitor` | str | Метрика для мониторинга Early Stopping | 'total_loss' |
+| `use_early_stopping` | bool | Использовать ли раннюю остановку | True |
 | `num_points` | int | Количество точек коллокации | 100 |
 | `weights` | Tuple[float, float, float] | Веса потерь [pde, bc_0, bc_1] | (1.0, 1.0, 1.0) |
 | `save_img` | bool | Сохранять ли график решения | False |
@@ -127,6 +128,7 @@ config = TrainConfig(
     max_epochs=5000,
     patience=300,
     min_delta=1e-7,
+    use_early_stopping=False,  # Отключить Early Stopping (обучение фиксированное число эпох)
     num_points=200,
     weights=(1.0, 2.0, 2.0),
     save_img=True,

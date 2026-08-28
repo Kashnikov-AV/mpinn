@@ -7,7 +7,7 @@
 
 import jax.numpy as jnp
 from mpinn.config import PhysicsParams, TrainConfig
-from mpinn.runner import run_experiment
+from mpinn.runner import run_experiment_1D
 from mpinn.pde import line_1d
 from mpinn.analytic import line_1d_dirichlet_exact
 from mpinn.bc import dirichlet_bc
@@ -41,7 +41,7 @@ def main():
     print(f"Конфигурация: {config.num_points} точек коллокации, {config.max_epochs} эпох")
     
     # Запуск эксперимента
-    metrics, history = run_experiment(
+    metrics, history = run_experiment_1D(
         config=config,
         phys=phys,
         pde_fn=line_1d,

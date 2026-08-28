@@ -67,6 +67,7 @@ class TrainConfig:
     patience: int = 200  # Число эпох без улучшения до остановки
     min_delta: float = 1e-6  # Минимальное изменение для учета как улучшения
     monitor: str = "total_loss"  # Метрика для мониторинга
+    use_early_stopping: bool = True  # Использовать ли раннюю остановку
 
     # Данные
     num_points: int = 100
