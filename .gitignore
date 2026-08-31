@@ -4,7 +4,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
+*.whl
+*.gz
 # Logs and temp files
 *.log
 *.tmp
