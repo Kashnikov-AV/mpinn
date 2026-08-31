@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 from flax import nnx
 
-from mpinn.bc import dirichlet_bc, neuman_bc, robin_bc
+from mpinn.bc import dirichlet_bc, neumann_bc, robin_bc
 
 
 class TestDirichletBC:
@@ -26,12 +26,12 @@ class TestDirichletBC:
 
         # For testing, we just check the function accepts proper inputs
         # The actual loss depends on network output
-        loss_left = dirichlet_bc(net, x0, target_value)
-        loss_right = dirichlet_bc(net, x1, target_value)
+        residuals_left = dirichlet_bc(net, x0, target_value)
+        residuals_right = dirichlet_bc(net, x1, target_value)
 
-        # Loss should be finite
-        assert jnp.isfinite(loss_left), f"Expected finite loss, got {loss_left}"
-        assert jnp.isfinite(loss_right), f"Expected finite loss, got {loss_right}"
+        # Residuals should be finite
+        assert jnp.all(jnp.isfinite(residuals_left)), f"Expected finite residuals, got {residuals_left}"
+        assert jnp.all(jnp.isfinite(residuals_right)), f"Expected finite residuals, got {residuals_right}"
 
     def test_dirichlet_nonzero_loss(self, boundary_points, seed_key):
         """Check that loss is non-zero when BC is not satisfied."""
@@ -46,14 +46,15 @@ class TestDirichletBC:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        loss = dirichlet_bc(net, x0, target_value)
+        residuals = dirichlet_bc(net, x0, target_value)
 
         # Loss should be finite and non-negative
+        loss = jnp.mean(residuals ** 2)
         assert jnp.isfinite(loss), f"Expected finite loss, got {loss}"
         assert loss >= 0, f"Loss should be non-negative, got {loss}"
 
     def test_dirichlet_output_shape(self, boundary_points, seed_key):
-        """Check that loss is a scalar (due to mean)."""
+        """Check that residuals have shape (n_points,)."""
         x0 = boundary_points["left"]
         target_value = 1.0
 
@@ -64,10 +65,10 @@ class TestDirichletBC:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        loss = dirichlet_bc(net, x0, target_value)
+        residuals = dirichlet_bc(net, x0, target_value)
 
-        # Should be scalar due to jnp.mean
-        assert loss.ndim == 0, f"Expected scalar loss, got shape {loss.shape}"
+        # Should have shape (n_points,) where n_points is the number of boundary points
+        assert residuals.shape == (1,), f"Expected shape (1,), got {residuals.shape}"
 
 
 class TestNeumanBC:
@@ -76,6 +77,8 @@ class TestNeumanBC:
     def test_neuman_exact_derivative(self, boundary_points, seed_key):
         """Check that derivative at boundary can be computed."""
         x1 = boundary_points["right"]
+        # Normal pointing outward from right boundary
+        normal = jnp.array([[1.0]], dtype=jnp.float32)
 
         target_derivative = 3.0
 
@@ -86,14 +89,15 @@ class TestNeumanBC:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        loss = neuman_bc(net, x1, target_derivative)
+        residuals = neumann_bc(net, x1, normal, target_derivative)
 
-        # Loss should be finite
-        assert jnp.isfinite(loss), f"Expected finite loss, got {loss}"
+        # Residuals should be finite
+        assert jnp.all(jnp.isfinite(residuals)), f"Expected finite residuals, got {residuals}"
 
     def test_neuman_nonzero_loss(self, boundary_points, seed_key):
         """Check loss computation for Neumann BC."""
         x1 = boundary_points["right"]
+        normal = jnp.array([[1.0]], dtype=jnp.float32)
 
         target_derivative = 5.0
 
@@ -104,15 +108,17 @@ class TestNeumanBC:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        loss = neuman_bc(net, x1, target_derivative)
+        residuals = neumann_bc(net, x1, normal, target_derivative)
 
         # Loss should be finite and non-negative
+        loss = jnp.mean(residuals ** 2)
         assert jnp.isfinite(loss), f"Expected finite loss, got {loss}"
         assert loss >= 0, f"Loss should be non-negative, got {loss}"
 
     def test_neuman_output_shape(self, boundary_points, seed_key):
-        """Check that loss is a scalar."""
+        """Check that residuals have shape (n_points,)."""
         x1 = boundary_points["right"]
+        normal = jnp.array([[1.0]], dtype=jnp.float32)
         target_derivative = 1.0
 
         rngs = nnx.Rngs(seed_key)
@@ -122,9 +128,9 @@ class TestNeumanBC:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        loss = neuman_bc(net, x1, target_derivative)
+        residuals = neumann_bc(net, x1, normal, target_derivative)
 
-        assert loss.ndim == 0, f"Expected scalar loss, got shape {loss.shape}"
+        assert residuals.shape == (1,), f"Expected shape (1,), got {residuals.shape}"
 
 
 class TestRobinBC:
@@ -133,6 +139,7 @@ class TestRobinBC:
     def test_robin_exact_condition(self, boundary_points, seed_key):
         """Check Robin BC computation."""
         x1 = boundary_points["right"]
+        normal = jnp.array([[1.0]], dtype=jnp.float32)
 
         a_coeff = 2.0
         b_coeff = 3.0
@@ -145,14 +152,15 @@ class TestRobinBC:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        loss = robin_bc(net, x1, a_coeff, b_coeff, g_value)
+        residuals = robin_bc(net, x1, normal, a_coeff, b_coeff, g_value)
 
-        # Loss should be finite
-        assert jnp.isfinite(loss), f"Expected finite loss, got {loss}"
+        # Residuals should be finite
+        assert jnp.all(jnp.isfinite(residuals)), f"Expected finite residuals, got {residuals}"
 
     def test_robin_output_shape(self, boundary_points, seed_key):
-        """Check that loss is a scalar."""
+        """Check that residuals have shape (n_points,)."""
         x1 = boundary_points["right"]
+        normal = jnp.array([[1.0]], dtype=jnp.float32)
 
         rngs = nnx.Rngs(seed_key)
         from mpinn.pinn_core import FCNet
@@ -161,16 +169,16 @@ class TestRobinBC:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        loss = robin_bc(net, x1, 1.0, 1.0, 1.0)
+        residuals = robin_bc(net, x1, normal, 1.0, 1.0, 1.0)
 
-        assert loss.ndim == 0, f"Expected scalar loss, got shape {loss.shape}"
+        assert residuals.shape == (1,), f"Expected shape (1,), got {residuals.shape}"
 
 
 class TestBCDeterminism:
     """Test determinism of BC computations."""
 
     def test_dirichlet_deterministic(self, boundary_points, seed_key):
-        """Check that same input produces same loss."""
+        """Check that same input produces same residuals."""
         x0 = boundary_points["left"]
         target_value = 42.0
 
@@ -181,7 +189,7 @@ class TestBCDeterminism:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        loss1 = dirichlet_bc(net, x0, target_value)
-        loss2 = dirichlet_bc(net, x0, target_value)
+        residuals1 = dirichlet_bc(net, x0, target_value)
+        residuals2 = dirichlet_bc(net, x0, target_value)
 
-        assert jnp.allclose(loss1, loss2), "BC loss should be deterministic"
+        assert jnp.allclose(residuals1, residuals2), "BC residuals should be deterministic"
