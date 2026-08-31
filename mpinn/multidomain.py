@@ -90,6 +90,7 @@ class MPINN:
         n_collocation: int = 100,
         weight_strategy: BaseWeightStrategy | None = None,
         rng: jax.Array | None = None,
+        interface_weight: float = 1.0,
     ):
         """
         Initialize MPINN with multiple neural networks for multi-domain problems.
@@ -101,11 +102,13 @@ class MPINN:
             n_collocation: Number of collocation points per domain
             weight_strategy: Strategy for loss weighting (default: FixedWeightStrategy)
             rng: JAX random key
+            interface_weight: Single weight for all interface continuity conditions
         """
         self.boundaries = (phys.x0,) + tuple(phys.interfaces) + (phys.x1,)
         self.n_domains = len(phys.all_lambdas)
         self.interfaces = tuple(phys.interfaces)
         self.all_lambdas = phys.all_lambdas
+        self.interface_weight = interface_weight
 
         if rng is None:
             rng = jax.random.PRNGKey(0)
@@ -184,19 +187,25 @@ class MPINN:
                 ),
             }
 
-            # Compute weights using the strategy
+            # Compute weights using the strategy (only for PDE and BC)
             weights = self.weight_strategy.compute_weights(all_losses, step=0)
 
             # Aggregate weighted losses
             total = 0.0
-            for domain, domain_weights in weights.items():
-                for loss_name, weight in domain_weights.items():
-                    if domain == "pde":
-                        total += weight * all_losses["pde"][loss_name]
-                    elif domain == "bc":
-                        total += weight * all_losses["bc"][loss_name]
-                    elif domain == "interface":
-                        total += weight * all_losses["interface"][loss_name]
+            
+            # Apply weights to PDE losses
+            if "pde" in weights:
+                for loss_name, weight in weights["pde"].items():
+                    total += weight * all_losses["pde"][loss_name]
+            
+            # Apply weights to BC losses
+            if "bc" in weights:
+                for loss_name, weight in weights["bc"].items():
+                    total += weight * all_losses["bc"][loss_name]
+            
+            # Apply single interface_weight to ALL interface losses (no per-interface weights)
+            for loss_val in interface_losses:
+                total += self.interface_weight * loss_val
 
             # Return total loss and individual losses for logging
             return total, (*pde_losses, loss_bc_l, loss_bc_r, *interface_losses)

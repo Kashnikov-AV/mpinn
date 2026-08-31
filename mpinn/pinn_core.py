@@ -54,9 +54,9 @@ class PINN:
         def total_loss(model, x_collocation):
             loss_pde = pde_fn(model, x_collocation, phys)
             loss_bcs = [bc_fn(model) for bc_fn in bc_fns]
-            total = self.weights[0] * loss_pde
-            for w, l_bc in zip(self.weights[1:], loss_bcs):
-                total += w * l_bc
+            # Суммируем все BC потери и применяем один вес
+            loss_bc_total = sum(loss_bcs)
+            total = self.weights[0] * loss_pde + self.weights[1] * loss_bc_total
             return total, (loss_pde, *loss_bcs)
         return total_loss
 
@@ -71,12 +71,14 @@ class PINN:
 
         losses = {"total_loss": float(total)}
         losses["pde"] = float(aux[0])
+        # Суммируем все BC потери для удобства отслеживания
+        losses["bc_total"] = float(sum(aux[1:]))
         for i, val in enumerate(aux[1:], start=1):
-            losses[f"bc_{i-1}"] = float(val)   # или более осмысленные имена
+            losses[f"bc_{i-1}"] = float(val)
         return losses
 
     def train_loop(self, x_collocation, pde_fn, bc_fns, phys, num_steps, log_interval=100):
-        loss_names = ["pde"] + [f"bc_{i}" for i in range(len(bc_fns))]
+        loss_names = ["pde", "bc_total"] + [f"bc_{i}" for i in range(len(bc_fns))]
         history = {"steps": [], "total_loss": []}
         for name in loss_names:
             history[name] = []
