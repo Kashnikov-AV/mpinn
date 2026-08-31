@@ -3,6 +3,15 @@ Multi-Domain PINN (MPINN) implementation.
 
 MPINN coordinates multiple independent PINN instances, each trained on its own domain,
 while enforcing continuity conditions at domain interfaces.
+
+Each domain has its own:
+- Geometry (Interval for 1D)
+- PDE function
+- BC configs (only for EXTERNAL boundaries, NOT interfaces)
+- Collocation points
+- Weights for PDE and BC losses
+
+Interface conditions are handled separately via interface_loss.
 """
 
 import time
@@ -19,7 +28,6 @@ from jax import jit, value_and_grad
 
 from .geom import Interval
 from .pinn_core import PINN, FCNet
-from .weight_strategies import BaseWeightStrategy, FixedWeightStrategy
 
 
 def compute_interface_loss(
@@ -29,7 +37,7 @@ def compute_interface_loss(
     Compute interface losses between adjacent domains.
 
     Enforces continuity of solution and flux at domain interfaces:
-    - Continuity of T: (T0 - T1)^T1
+    - Continuity of T: (T0 - T1)^2
     - Continuity of flux: (lambda_left * dT/dx|left - lambda_right * dT/dx|right)^2
 
     Args:
@@ -72,153 +80,160 @@ class MPINN:
     Multi-Domain Physics-Informed Neural Network.
 
     Coordinates training of multiple PINN instances across different spatial domains,
-    enforcing boundary conditions and interface continuity constraints.
+    enforcing boundary conditions on external boundaries only and interface continuity constraints.
 
     Attributes:
         boundaries: Tuple of domain boundary coordinates (including interfaces)
         n_domains: Number of subdomains
         interfaces: Tuple of interface x-coordinates
-        pinn_instances: Tuple of PINN objects, one per domain
-        weight_strategy: Strategy for computing loss weights
+        pinn_instances: List of PINN objects, one per domain
+        domain_configs: List of configuration dicts for each domain
     """
 
     def __init__(
         self,
-        nets: tuple[FCNet, ...],
-        opt: optax.GradientTransformation,
-        phys: Any,
-        n_collocation: int = 100,
-        weight_strategy: BaseWeightStrategy | None = None,
-        rng: jax.Array | None = None,
+        domain_configs: list[dict],
+        interfaces: tuple[float, ...],
+        all_lambdas: tuple[float, ...],
         interface_weight: float = 1.0,
+        rng: jax.Array | None = None,
     ):
         """
         Initialize MPINN with multiple neural networks for multi-domain problems.
 
+        Each domain_config should contain:
+        - 'geom': Interval geometry for the domain
+        - 'pde': PDE residual function for this domain
+        - 'bc_configs': List of BC configs for EXTERNAL boundaries only
+        - 'n_points': Number of collocation points in interior
+        - 'weights': Tuple (pde_weight, bc_weight) for this domain
+        - 'net': Optional pre-created FCNet (if not provided, will use default arch)
+
         Args:
-            nets: Tuple of FCNet instances, one per domain
-            opt: Optax optimizer
-            phys: PhysicsParams object containing domain configuration
-            n_collocation: Number of collocation points per domain
-            weight_strategy: Strategy for loss weighting (default: FixedWeightStrategy)
+            domain_configs: List of dicts, one per domain with geometry, PDE, BC configs, weights
+            interfaces: Tuple of interface x-coordinates between domains
+            all_lambdas: Tuple of thermal conductivity values for each domain
+            interface_weight: Weight for interface continuity conditions
             rng: JAX random key
-            interface_weight: Single weight for all interface continuity conditions
         """
-        self.boundaries = (phys.x0,) + tuple(phys.interfaces) + (phys.x1,)
-        self.n_domains = len(phys.all_lambdas)
-        self.interfaces = tuple(phys.interfaces)
-        self.all_lambdas = phys.all_lambdas
+        self.n_domains = len(domain_configs)
+        self.interfaces = interfaces
+        self.all_lambdas = all_lambdas
         self.interface_weight = interface_weight
+        self.domain_configs = domain_configs
 
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
+        # Build boundaries from geometries
+        self.boundaries = tuple(
+            (cfg['geom'].x0, cfg['geom'].x1) for cfg in domain_configs
+        )
+        
         # Generate collocation points for each domain
         col_keys = jax.random.split(rng, self.n_domains)
         self.x_collocation = tuple(
-            Interval(b0, b1).sample_interior(n_collocation, rng=k)
-            for b0, b1, k in zip(self.boundaries[:-1], self.boundaries[1:], col_keys)
+            cfg['geom'].sample_interior(cfg['n_points'], rng=k)
+            for cfg, k in zip(domain_configs, col_keys)
         )
 
-        # Create independent PINN instances for each domain
-        self.pinn_instances = tuple(PINN(net, opt, weights=(1.0,)) for net in nets)
+        # Create independent PINN instances for each domain with their own weights
+        self.pinn_instances = []
+        for cfg in domain_configs:
+            net = cfg.get('net')
+            if net is None:
+                # Default network creation if not provided
+                raise ValueError("Each domain_config must include a 'net' key with FCNet instance")
+            pinn = PINN(net, cfg['opt'], weights=cfg['weights'])
+            self.pinn_instances.append(pinn)
 
         self.graphdefs = tuple(p.graphdef for p in self.pinn_instances)
         self.params = tuple(p.params for p in self.pinn_instances)
         self.txs = tuple(p.tx for p in self.pinn_instances)
         self.opt_states = tuple(p.opt_state for p in self.pinn_instances)
 
-        # Initialize weight strategy
-        self.weight_strategy = weight_strategy or FixedWeightStrategy()
-
-    def create_loss_fn(
-        self, pde_fn: Callable, bc_left_fn: Callable, bc_right_fn: Callable, phys: Any
-    ):
+    def create_loss_fn(self, phys: Any | None = None):
         """
         Create a composite loss function for multi-domain training.
 
         The total loss includes:
-        - PDE residuals in each domain
-        - Boundary conditions at left and right boundaries
+        - PDE residuals in each domain (computed via PINN.create_loss_fn)
+        - BC losses on EXTERNAL boundaries only (via bc_configs in each domain)
         - Interface continuity conditions (solution and flux)
 
         Args:
-            pde_fn: PDE residual function
-            bc_left_fn: Left boundary condition function
-            bc_right_fn: Right boundary condition function
-            phys: PhysicsParams object
+            phys: Optional PhysicsParams object (can be used for global params)
 
         Returns:
-            A loss function with signature (params_tuple, x_collocation) -> (total_loss, aux_losses)
+            A loss function with signature (params_tuple,) -> (total_loss, aux_losses)
         """
-        pde_bound = partial(pde_fn, phys=phys)
-
-        def total_loss(params_tuple, x_collocation):
+        def total_loss(params_tuple):
             # Reconstruct models from graphdefs and parameters
             models = tuple(
                 nnx.merge(g, p) for g, p in zip(self.graphdefs, params_tuple)
             )
 
-            # Compute PDE losses for each domain
-            pde_losses = tuple(
-                pde_bound(m, x_d) for m, x_d in zip(models, x_collocation)
-            )
+            # Compute PDE + BC losses for each domain using their own loss_fn
+            domain_losses = []
+            all_pde_losses = {}
+            all_bc_losses = {}
 
-            # Compute boundary condition losses
-            loss_bc_l = bc_left_fn(models[0])
-            loss_bc_r = bc_right_fn(models[-1])
+            for i, (pinn, model, x_d, cfg) in enumerate(
+                zip(self.pinn_instances, models, self.x_collocation, self.domain_configs)
+            ):
+                # Get domain-specific loss function
+                pde_fn = cfg['pde']
+                bc_configs = cfg['bc_configs']
+                
+                # Create loss function for this domain
+                domain_loss_fn = pinn.create_loss_fn(pde_fn, bc_configs, phys)
+                
+                # Compute loss for this domain
+                domain_total, aux = domain_loss_fn(model, x_d)
+                
+                domain_losses.append(domain_total)
+                all_pde_losses[f"pde_{i}"] = float(aux[0])
+                
+                # BC losses from aux[1:]
+                for j, bc_loss in enumerate(aux[1:]):
+                    all_bc_losses[f"bc_domain{i}_{j}"] = float(bc_loss)
 
-            # Compute interface losses using extracted function
+            # Compute interface losses
             interface_losses = compute_interface_loss(
                 models, self.interfaces, self.all_lambdas
             )
-
-            # Collect all raw losses
-            all_losses = {
-                "pde": dict(
-                    zip([f"pde_{i}" for i in range(self.n_domains)], pde_losses)
-                ),
-                "bc": {"bc_left": loss_bc_l, "bc_right": loss_bc_r},
-                "interface": dict(
-                    zip(
-                        [f"interface_{i}" for i in range(len(self.interfaces))],
-                        interface_losses,
-                    )
-                ),
+            all_interface_losses = {
+                f"interface_{i}": float(loss) for i, loss in enumerate(interface_losses)
             }
 
-            # Compute weights using the strategy (only for PDE and BC)
-            weights = self.weight_strategy.compute_weights(all_losses, step=0)
+            # Sum domain losses
+            sum_domain_losses = sum(domain_losses)
+            
+            # Add weighted interface losses
+            interface_loss_total = self.interface_weight * sum(interface_losses)
+            
+            total = sum_domain_losses + interface_loss_total
 
-            # Aggregate weighted losses
-            total = 0.0
-            
-            # Apply weights to PDE losses
-            if "pde" in weights:
-                for loss_name, weight in weights["pde"].items():
-                    total += weight * all_losses["pde"][loss_name]
-            
-            # Apply weights to BC losses
-            if "bc" in weights:
-                for loss_name, weight in weights["bc"].items():
-                    total += weight * all_losses["bc"][loss_name]
-            
-            # Apply single interface_weight to ALL interface losses (no per-interface weights)
-            for loss_val in interface_losses:
-                total += self.interface_weight * loss_val
+            # Collect all losses for logging
+            all_losses = {
+                **all_pde_losses,
+                **all_bc_losses,
+                **all_interface_losses,
+            }
 
             # Return total loss and individual losses for logging
-            return total, (*pde_losses, loss_bc_l, loss_bc_r, *interface_losses)
+            aux_losses = (
+                *domain_losses,
+                *interface_losses,
+            )
+            return total, aux_losses
 
         return total_loss
 
-    @partial(jit, static_argnames=["self", "txs"])
+    @partial(jit, static_argnames=["self"])
     def train_step(
         self,
         params: tuple,
-        x_collocation: tuple,
-        txs: tuple,
-        opt_states: tuple,
         loss_fn: Callable,
     ):
         """
@@ -226,24 +241,20 @@ class MPINN:
 
         Args:
             params: Tuple of parameters for each PINN
-            x_collocation: Tuple of collocation points for each domain
-            txs: Tuple of optimizers for each PINN
-            opt_states: Tuple of optimizer states for each PINN
-            loss_fn: Loss function created by create_loss_fn
+            loss_fn: Loss function created by create_loss_fn (already has x_collocation bound)
 
         Returns:
             Tuple of (new_params, new_opt_states, total_loss, aux_losses)
         """
-
         def closure(p):
-            return loss_fn(p, x_collocation)
+            return loss_fn(p)
 
         (total, aux), grads = value_and_grad(closure, has_aux=True)(params)
 
         # Update each domain's parameters independently
         new_params = []
         new_opt_states = []
-        for p, g, tx, os in zip(params, grads, txs, opt_states):
+        for p, g, tx, os in zip(params, grads, self.txs, self.opt_states):
             updates, new_os = tx.update(g, os)
             new_params.append(optax.apply_updates(p, updates))
             new_opt_states.append(new_os)
@@ -262,7 +273,7 @@ class MPINN:
 
         Args:
             num_steps: Number of training steps
-            loss_fn: Loss function
+            loss_fn: Loss function (already has x_collocation bound)
             loss_names: Names of loss components for logging
             log_interval: Frequency of logging
 
@@ -276,7 +287,7 @@ class MPINN:
         curr_params, curr_opt_states = self.params, self.opt_states
         for step in range(num_steps):
             curr_params, curr_opt_states, total, aux = self.train_step(
-                curr_params, self.x_collocation, self.txs, curr_opt_states, loss_fn
+                curr_params, loss_fn
             )
             if step % log_interval == 0 or step == num_steps - 1:
                 history["steps"].append(step)
@@ -290,32 +301,24 @@ class MPINN:
 
     def fit(
         self,
-        pde_fn: Callable,
-        bc_left_fn: Callable,
-        bc_right_fn: Callable,
-        phys: Any,
-        epochs: int,
+        phys: Any | None = None,
+        epochs: int = 1000,
         log_interval: int = 100,
     ):
         """
         Train the MPINN model.
 
         Args:
-            pde_fn: PDE residual function
-            bc_left_fn: Left boundary condition function
-            bc_right_fn: Right boundary condition function
-            phys: PhysicsParams object
+            phys: Optional PhysicsParams object passed to create_loss_fn
             epochs: Number of training epochs
             log_interval: Frequency of logging
 
         Returns:
             Tuple of (history_dict, training_time)
         """
-        loss_fn = self.create_loss_fn(pde_fn, bc_left_fn, bc_right_fn, phys)
+        loss_fn = self.create_loss_fn(phys)
         loss_names = (
-            *[f"pde_{i}" for i in range(self.n_domains)],
-            "bc_left",
-            "bc_right",
+            *[f"domain_{i}_loss" for i in range(self.n_domains)],
             *[f"interface_{i}" for i in range(len(self.interfaces))],
         )
 
