@@ -71,8 +71,8 @@ class TrainConfig:
     # Данные
     num_points: int = 100
 
-    # Веса потерь [pde, bc_0, bc_1]
-    weights: tuple[float, float, float] = field(default_factory=lambda: (1.0, 1.0, 1.0))
+    # Веса потерь [pde, bc] - один вес для PDE, один для всех BC
+    weights: tuple[float, float] = field(default_factory=lambda: (1.0, 1.0))
 
     # Настройки вывода
     save_img: bool = False
@@ -124,5 +124,5 @@ DEFAULT_TRAIN_CONFIG = {
     "patience": 200,
     "min_delta": 1e-6,
     "num_points": 100,
-    "weights": (1.0, 1.0, 1.0),
+    "weights": (1.0, 1.0),
 }
