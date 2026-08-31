@@ -4,7 +4,6 @@ from . import (
     bc_2d_3d,
     config,
     geom,
-    geom_extended,
     geometry_io,
     multidomain,
     pde,
