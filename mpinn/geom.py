@@ -729,7 +729,7 @@ class Annulus2D(GeometryBase):
     Параметры:
         center: центр (x, y)
         R_outer: внешний радиус (> 0)
-        R_inner: внутренний радиус (>= 0, если 0 - сплошной круг)
+        R_inner: внутренний радиус (> 0)
     """
 
     def __init__(
@@ -737,8 +737,8 @@ class Annulus2D(GeometryBase):
     ):
         if R_outer <= 0:
             raise ValueError("R_outer должен быть > 0")
-        if R_inner < 0:
-            raise ValueError("R_inner должен быть >= 0")
+        if R_inner <= 0:
+            raise ValueError("R_inner должен быть > 0")
         if R_inner >= R_outer:
             raise ValueError("R_inner должен быть < R_outer")
 
