@@ -30,128 +30,6 @@ class Geometry(ABC):
         """
         pass
 
-    def plot_domain(
-        self,
-        interior_points,
-        boundary_points=None,
-        interface_points=None,
-        title="Domain Visualization",
-    ):
-        """
-        Визуализирует домен с точками коллокации.
-
-        Args:
-            interior_points: внутренние точки (N, dim)
-            boundary_points: граничные точки (M, dim), опционально
-            interface_points: точки на интерфейсах доменов (K, dim), опционально
-            title: заголовок графика
-        """
-        if self.dim == 2:
-            self._plot_2d(interior_points, boundary_points, interface_points, title)
-        elif self.dim == 3:
-            self._plot_3d(interior_points, boundary_points, interface_points, title)
-        else:
-            raise ValueError(f"Visualization not supported for {self.dim}D")
-
-    def _plot_2d(
-        self, interior, boundary=None, interface=None, title="Domain Visualization"
-    ):
-        """Отрисовка 2D домена"""
-        plt.figure(figsize=(8, 6))
-
-        # Внутренние точки - синие
-        if interior is not None and len(interior) > 0:
-            plt.scatter(
-                interior[:, 0],
-                interior[:, 1],
-                c="blue",
-                s=10,
-                alpha=0.5,
-                label="Interior",
-            )
-
-        # Граничные точки - зеленые
-        if boundary is not None and len(boundary) > 0:
-            plt.scatter(
-                boundary[:, 0],
-                boundary[:, 1],
-                c="green",
-                s=20,
-                alpha=0.7,
-                label="Boundary",
-            )
-
-        # Точки на интерфейсах - красные
-        if interface is not None and len(interface) > 0:
-            plt.scatter(
-                interface[:, 0],
-                interface[:, 1],
-                c="red",
-                s=20,
-                alpha=0.7,
-                label="Interface",
-            )
-
-        plt.xlabel("x")
-        plt.ylabel("y")
-        plt.title(title)
-        plt.legend(loc="best")
-        plt.grid(True, alpha=0.3)
-        plt.axis("equal")
-        plt.tight_layout()
-        plt.show()
-
-    def _plot_3d(
-        self, interior, boundary=None, interface=None, title="Domain Visualization"
-    ):
-        """Отрисовка 3D домена"""
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection="3d")
-
-        # Внутренние точки - синие
-        if interior is not None and len(interior) > 0:
-            ax.scatter(
-                interior[:, 0],
-                interior[:, 1],
-                interior[:, 2],
-                c="blue",
-                s=10,
-                alpha=0.5,
-                label="Interior",
-            )
-
-        # Граничные точки - зеленые
-        if boundary is not None and len(boundary) > 0:
-            ax.scatter(
-                boundary[:, 0],
-                boundary[:, 1],
-                boundary[:, 2],
-                c="green",
-                s=20,
-                alpha=0.7,
-                label="Boundary",
-            )
-
-        # Точки на интерфейсах - красные
-        if interface is not None and len(interface) > 0:
-            ax.scatter(
-                interface[:, 0],
-                interface[:, 1],
-                interface[:, 2],
-                c="red",
-                s=20,
-                alpha=0.7,
-                label="Interface",
-            )
-
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        ax.set_zlabel("z")
-        ax.set_title(title)
-        ax.legend(loc="best")
-        plt.tight_layout()
-        plt.show()
-
 
 class Interval(Geometry):
     def __init__(self, x0, x1):
@@ -1397,203 +1275,6 @@ class MeshGeometry(Geometry):
 
         return self.normals[closest_face_idx]
 
-    def plot_domain(
-        self,
-        interior_points=None,
-        boundary_points=None,
-        interface_points=None,
-        title="Domain Visualization",
-        show_normals: bool = False,
-        normal_scale: float = 0.1,
-    ):
-        """
-        Visualize the mesh geometry with sampled points.
-
-        Args:
-            interior_points: Internal collocation points
-            boundary_points: Boundary points
-            interface_points: Interface points for multi-domain
-            title: Plot title
-            show_normals: Whether to show normal vectors
-            normal_scale: Scale factor for normal visualization
-        """
-        if self.dim == 2:
-            self._plot_2d(
-                interior_points,
-                boundary_points,
-                interface_points,
-                title,
-                show_normals,
-                normal_scale,
-            )
-        elif self.dim == 3:
-            self._plot_3d(
-                interior_points,
-                boundary_points,
-                interface_points,
-                title,
-                show_normals,
-                normal_scale,
-            )
-
-    def _plot_2d(self, interior, boundary, interface, title, show_normals, scale):
-        """2D visualization with mesh wireframe."""
-        _fig, ax = plt.subplots(figsize=(8, 6))
-
-        # Plot mesh edges
-        if len(self.faces) > 0:
-            for face in self.faces:
-                verts = self.vertices[face]
-                # Close the loop for triangles
-                verts_closed = jnp.vstack([verts, verts[0]])
-                ax.plot(
-                    verts_closed[:, 0],
-                    verts_closed[:, 1],
-                    "k-",
-                    alpha=0.3,
-                    linewidth=0.5,
-                )
-
-        # Plot sampled points
-        if interior is not None and len(interior) > 0:
-            ax.scatter(
-                interior[:, 0],
-                interior[:, 1],
-                c="blue",
-                s=10,
-                alpha=0.5,
-                label="Interior",
-            )
-
-        if boundary is not None and len(boundary) > 0:
-            if isinstance(boundary, tuple):
-                boundary_pts, normals = boundary
-                ax.scatter(
-                    boundary_pts[:, 0],
-                    boundary_pts[:, 1],
-                    c="green",
-                    s=20,
-                    alpha=0.7,
-                    label="Boundary",
-                )
-
-                if show_normals:
-                    # Plot normal vectors
-                    for i in range(min(50, len(boundary_pts))):  # Limit for clarity
-                        pt = boundary_pts[i]
-                        n = normals[i]
-                        ax.arrow(
-                            pt[0],
-                            pt[1],
-                            scale * n[0],
-                            scale * n[1],
-                            head_width=0.02,
-                            head_length=0.03,
-                            fc="red",
-                            ec="red",
-                        )
-            else:
-                ax.scatter(
-                    boundary[:, 0],
-                    boundary[:, 1],
-                    c="green",
-                    s=20,
-                    alpha=0.7,
-                    label="Boundary",
-                )
-
-        if interface is not None and len(interface) > 0:
-            ax.scatter(
-                interface[:, 0],
-                interface[:, 1],
-                c="red",
-                s=20,
-                alpha=0.7,
-                label="Interface",
-            )
-
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        ax.set_title(title)
-        ax.legend(loc="best")
-        ax.grid(True, alpha=0.3)
-        ax.set_aspect("equal")
-        plt.tight_layout()
-        plt.show()
-
-    def _plot_3d(self, interior, boundary, interface, title, show_normals, scale):
-        """3D visualization."""
-        try:
-            import pyvista as pv
-
-            has_pyvista = True
-        except ImportError:
-            has_pyvista = False
-
-        if has_pyvista:
-            # Use PyVista for better 3D visualization
-            mesh = pv.PolyData(
-                self.vertices, np.hstack([np.full((len(self.faces), 1), 3), self.faces])
-            )
-            plotter = pv.Plotter()
-            plotter.add_mesh(mesh, opacity=0.5, show_edges=True)
-
-            if interior is not None and len(interior) > 0:
-                plotter.add_points(
-                    interior, color="blue", point_size=5, label="Interior"
-                )
-
-            if boundary is not None and len(boundary) > 0:
-                if isinstance(boundary, tuple):
-                    boundary_pts, _ = boundary
-                else:
-                    boundary_pts = boundary
-                plotter.add_points(
-                    boundary_pts, color="green", point_size=8, label="Boundary"
-                )
-
-            plotter.add_title(title)
-            plotter.show()
-        else:
-            # Fallback to matplotlib
-            fig = plt.figure(figsize=(10, 8))
-            ax = fig.add_subplot(111, projection="3d")
-
-            # Plot points
-            if interior is not None and len(interior) > 0:
-                ax.scatter(
-                    interior[:, 0],
-                    interior[:, 1],
-                    interior[:, 2],
-                    c="blue",
-                    s=10,
-                    alpha=0.5,
-                    label="Interior",
-                )
-
-            if boundary is not None and len(boundary) > 0:
-                if isinstance(boundary, tuple):
-                    boundary_pts, _ = boundary
-                else:
-                    boundary_pts = boundary
-                ax.scatter(
-                    boundary_pts[:, 0],
-                    boundary_pts[:, 1],
-                    boundary_pts[:, 2],
-                    c="green",
-                    s=20,
-                    alpha=0.7,
-                    label="Boundary",
-                )
-
-            ax.set_xlabel("x")
-            ax.set_ylabel("y")
-            ax.set_zlabel("z")
-            ax.set_title(title)
-            ax.legend(loc="best")
-            plt.tight_layout()
-            plt.show()
-
 
 class CompositeGeometry(Geometry):
     """
@@ -1707,3 +1388,202 @@ class CompositeGeometry(Geometry):
             return geom1.sample_boundary(n_points, rng=rng)
         else:
             raise NotImplementedError("Interface sampling requires MeshGeometry")
+
+
+def plot_domain(geometry, interior_points, boundary_points=None, interface_points=None, title="Domain Visualization", **kwargs):
+    """
+    Визуализирует домен с точками коллокации.
+
+    Args:
+        geometry: объект Geometry для определения размерности
+        interior_points: внутренние точки (N, dim)
+        boundary_points: граничные точки (M, dim), опционально
+        interface_points: точки на интерфейсах доменов (K, dim), опционально
+        title: заголовок графика
+        **kwargs: дополнительные аргументы для специфичных типов геометрии (например, show_normals, normal_scale)
+    """
+    if geometry.dim == 1:
+        _plot_1d(interior_points, boundary_points, interface_points, title)
+    elif geometry.dim == 2:
+        _plot_2d(interior_points, boundary_points, interface_points, title, **kwargs)
+    elif geometry.dim == 3:
+        _plot_3d(interior_points, boundary_points, interface_points, title, **kwargs)
+    else:
+        raise ValueError(f"Visualization not supported for {geometry.dim}D")
+
+
+def _plot_1d(interior, boundary=None, interface=None, title="Domain Visualization"):
+    """Отрисовка 1D домена"""
+    plt.figure(figsize=(10, 2))
+
+    # Внутренние точки - синие
+    if interior is not None and len(interior) > 0:
+        plt.scatter(
+            interior[:, 0],
+            jnp.zeros_like(interior[:, 0]),
+            c="blue",
+            s=30,
+            alpha=0.5,
+            label="Interior",
+        )
+
+    # Граничные точки - зеленые
+    if boundary is not None and len(boundary) > 0:
+        if isinstance(boundary, tuple):
+            boundary_pts, _ = boundary
+        else:
+            boundary_pts = boundary
+        plt.scatter(
+            boundary_pts[:, 0],
+            jnp.zeros_like(boundary_pts[:, 0]),
+            c="green",
+            s=50,
+            alpha=0.7,
+            label="Boundary",
+        )
+
+    # Точки на интерфейсах - красные
+    if interface is not None and len(interface) > 0:
+        plt.scatter(
+            interface[:, 0],
+            jnp.zeros_like(interface[:, 0]),
+            c="red",
+            s=50,
+            alpha=0.7,
+            label="Interface",
+        )
+
+    plt.xlabel("x")
+    plt.title(title)
+    plt.legend(loc="best")
+    plt.grid(True, alpha=0.3)
+    plt.yticks([])
+    plt.tight_layout()
+    plt.show()
+
+
+def _plot_2d(interior, boundary=None, interface=None, title="Domain Visualization", show_normals=False, scale=0.1):
+    """Отрисовка 2D домена"""
+    plt.figure(figsize=(8, 6))
+
+    # Внутренние точки - синие
+    if interior is not None and len(interior) > 0:
+        plt.scatter(
+            interior[:, 0],
+            interior[:, 1],
+            c="blue",
+            s=10,
+            alpha=0.5,
+            label="Interior",
+        )
+
+    # Граничные точки - зеленые
+    if boundary is not None and len(boundary) > 0:
+        if isinstance(boundary, tuple):
+            boundary_pts, normals = boundary
+            plt.scatter(
+                boundary_pts[:, 0],
+                boundary_pts[:, 1],
+                c="green",
+                s=20,
+                alpha=0.7,
+                label="Boundary",
+            )
+
+            if show_normals:
+                for i in range(min(50, len(boundary_pts))):
+                    pt = boundary_pts[i]
+                    n = normals[i]
+                    plt.arrow(
+                        pt[0],
+                        pt[1],
+                        scale * n[0],
+                        scale * n[1],
+                        head_width=0.02,
+                        head_length=0.03,
+                        fc="red",
+                        ec="red",
+                    )
+        else:
+            plt.scatter(
+                boundary[:, 0],
+                boundary[:, 1],
+                c="green",
+                s=20,
+                alpha=0.7,
+                label="Boundary",
+            )
+
+    # Точки на интерфейсах - красные
+    if interface is not None and len(interface) > 0:
+        plt.scatter(
+            interface[:, 0],
+            interface[:, 1],
+            c="red",
+            s=20,
+            alpha=0.7,
+            label="Interface",
+        )
+
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.title(title)
+    plt.legend(loc="best")
+    plt.grid(True, alpha=0.3)
+    plt.axis("equal")
+    plt.tight_layout()
+    plt.show()
+
+
+def _plot_3d(interior, boundary=None, interface=None, title="Domain Visualization", show_normals=False, scale=0.1):
+    """Отрисовка 3D домена"""
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection="3d")
+
+    # Внутренние точки - синие
+    if interior is not None and len(interior) > 0:
+        ax.scatter(
+            interior[:, 0],
+            interior[:, 1],
+            interior[:, 2],
+            c="blue",
+            s=10,
+            alpha=0.5,
+            label="Interior",
+        )
+
+    # Граничные точки - зеленые
+    if boundary is not None and len(boundary) > 0:
+        if isinstance(boundary, tuple):
+            boundary_pts, _ = boundary
+        else:
+            boundary_pts = boundary
+        ax.scatter(
+            boundary_pts[:, 0],
+            boundary_pts[:, 1],
+            boundary_pts[:, 2],
+            c="green",
+            s=20,
+            alpha=0.7,
+            label="Boundary",
+        )
+
+    # Точки на интерфейсах - красные
+    if interface is not None and len(interface) > 0:
+        ax.scatter(
+            interface[:, 0],
+            interface[:, 1],
+            interface[:, 2],
+            c="red",
+            s=20,
+            alpha=0.7,
+            label="Interface",
+        )
+
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_zlabel("z")
+    ax.set_title(title)
+    ax.legend(loc="best")
+    plt.tight_layout()
+    plt.show()
