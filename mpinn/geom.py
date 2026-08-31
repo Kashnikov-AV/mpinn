@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .geometry_io import MeshData
 
 class Geometry(ABC):
     def __init__(self, dim):

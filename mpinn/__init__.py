@@ -12,25 +12,9 @@ from . import (
     plotting,
     runner,
     sources,
-    weight_strategies,
-)
-
-# Экспорт новых классов геометрий
-from .geom_extended import (
-    Annulus2D,
-    GeometryBase,
-    HollowCylinder3D,
-    HollowSphere3D,
-    MeshGeometry,
 )
 
 __all__ = [
-    "Annulus2D",
-    # Новые классы
-    "GeometryBase",
-    "HollowCylinder3D",
-    "HollowSphere3D",
-    "MeshGeometry",
     "analytic",
     "bc",
     "bc_2d_3d",
@@ -45,5 +29,4 @@ __all__ = [
     "plotting",
     "runner",
     "sources",
-    "weight_strategies",
 ]
