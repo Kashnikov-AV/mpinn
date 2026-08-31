@@ -22,3 +22,5 @@ node_modules/
 .vscode/
 .idea/
 ```
+dist/mpinn-0.1.4.tar.gz
+dist/mpinn-0.1.4-py3-none-any.whl
