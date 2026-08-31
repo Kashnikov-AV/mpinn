@@ -26,7 +26,7 @@ class TestInterval:
     def test_sample_boundary(self):
         """Check that boundary points are at interval edges."""
         geom = Interval(0.0, 1.0)
-        boundaries = geom.sample_boundary()
+        boundaries, normals = geom.sample_boundary()
 
         # Should have 2 boundary points (left and right)
         assert boundaries.shape == (2, 1)
@@ -34,6 +34,11 @@ class TestInterval:
         # Check values correspond to interval bounds
         assert jnp.isclose(boundaries[0, 0], 0.0)
         assert jnp.isclose(boundaries[1, 0], 1.0)
+
+        # Check normals: -1 for left, +1 for right
+        assert normals.shape == (2, 1)
+        assert jnp.isclose(normals[0, 0], -1.0)
+        assert jnp.isclose(normals[1, 0], 1.0)
 
     def test_deterministic_sampling(self):
         """Check that same seed produces same points."""
