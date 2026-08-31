@@ -4,7 +4,6 @@
 
 import os
 import time
-from functools import partial
 from typing import Any
 
 import jax.numpy as jnp
@@ -14,7 +13,7 @@ from flax import nnx
 from mpinn.config import PhysicsParams, TrainConfig, get_activation, get_optimizer
 from mpinn.plotting import save_plot, show_plot
 
-from .bc import dirichlet_bc, robin_bc
+from .bc import dirichlet_bc, neumann_bc, robin_bc
 from .geom import Interval
 from .pinn_core import PINN, FCNet
 
@@ -24,7 +23,7 @@ def run_experiment_1D(
     phys: PhysicsParams | None = None,
     pde_fn=None,
     exact_fn=None,
-    bc_fns_override: list | None = None,
+    bc_configs_override: list | None = None,
 ) -> tuple[dict[str, Any], dict[str, list[float]]]:
     """
     Запуск одного эксперимента с Early Stopping.
@@ -34,7 +33,7 @@ def run_experiment_1D(
     - phys: физические параметры (если None, используются значения по умолчанию)
     - pde_fn: функция PDE (если None, используется line_1d)
     - exact_fn: функция точного решения для верификации
-    - bc_fns_override: список функций граничных условий (если None, создаются автоматически)
+    - bc_configs_override: список конфигураций BC (если None, создаются автоматически)
 
     Возвращает:
     - metrics: словарь с метриками (mse, mape, и т.д.)
@@ -52,13 +51,11 @@ def run_experiment_1D(
     if exact_fn is None:
         exact_fn = line_1d_robin_exact
 
-    # Геометрия и точки коллокации
     geom = Interval(phys.x0, phys.x1)
     x_collocation = geom.generate_collocation(
         n_interior=config.num_points, method="random"
     )
 
-    # Создание модели
     act_fn = get_activation(config.activation_name)
     net = FCNet(
         din=1,
@@ -72,23 +69,38 @@ def run_experiment_1D(
     optimizer = get_optimizer(config.opt_name, lr=config.lr)
     pinn = PINN(net, opt=optimizer, weights=list(config.weights))
 
-    # Граничные условия
-    if bc_fns_override is not None:
-        bc_fns = bc_fns_override
+    if bc_configs_override is not None:
+        bc_configs = bc_configs_override
     else:
-        bc_fns = [
-            partial(dirichlet_bc, x=phys.x0, T=phys.T0),
-            partial(
-                robin_bc, x=phys.x1, alpha=phys.alpha, beta=phys.beta, h=phys.gamma
-            ),
+        boundary_points, boundary_normals = geom.sample_boundary()
+        left_point = boundary_points[0:1]
+        right_point = boundary_points[1:2]
+        left_normal = boundary_normals[0:1]
+        right_normal = boundary_normals[1:2]
+
+        bc_configs = [
+            {
+                'fn': dirichlet_bc,
+                'points': left_point,
+                'params': {'values': phys.T0},
+            },
+            {
+                'fn': robin_bc,
+                'points': right_point,
+                'normals': right_normal,
+                'params': {
+                    'alpha': phys.alpha,
+                    'beta': phys.beta,
+                    'value': phys.gamma,
+                },
+            },
         ]
 
-    # Обучение с Early Stopping
     history, training_time = _train_with_early_stopping(
         pinn=pinn,
         x_collocation=x_collocation,
         pde_fn=pde_fn,
-        bc_fns=bc_fns,
+        bc_configs=bc_configs,
         phys=phys,
         max_epochs=config.max_epochs,
         patience=config.patience,
@@ -96,7 +108,6 @@ def run_experiment_1D(
         monitor=config.monitor,
     )
 
-    # Верификация
     x_test = jnp.linspace(phys.x0, phys.x1, 100).reshape(-1, 1)
     metrics, T_pred, T_exact = pinn.evaluate(
         x_test, exact_fn, phys, bc_names=["dirichlet", "robin"]
@@ -106,16 +117,13 @@ def run_experiment_1D(
         f"Эпохи: {len(history['steps'])}, Время: {training_time:.4f}c, MSE: {metrics['mse']}"
     )
 
-    # Сохранение графика
     if config.save_img and config.image_path:
         os.makedirs(os.path.dirname(config.image_path), exist_ok=True)
         save_plot(x_test, T_pred, T_exact, phys, save_path=config.image_path)
 
-    # Показ графика
     if config.show_plot:
         show_plot(x_test, T_pred, T_exact, phys)
 
-    # Формирование результата
     result = {
         "bc_left": metrics["bc_left"],
         "bc_right": metrics["bc_right"],
@@ -142,7 +150,7 @@ def _train_with_early_stopping(
     pinn: PINN,
     x_collocation: jnp.ndarray,
     pde_fn,
-    bc_fns: list,
+    bc_configs: list,
     phys: PhysicsParams,
     max_epochs: int,
     patience: int,
@@ -156,7 +164,7 @@ def _train_with_early_stopping(
     - pinn: объект PINN
     - x_collocation: точки коллокации
     - pde_fn: функция PDE
-    - bc_fns: список функций граничных условий
+    - bc_configs: список конфигураций граничных условий
     - phys: физические параметры
     - max_epochs: максимальное число эпох
     - patience: число эпох без улучшения до остановки
@@ -173,44 +181,41 @@ def _train_with_early_stopping(
     epochs_without_improvement = 0
     best_state = None
 
+    n_bc = len(bc_configs)
     history = {
         "steps": [],
         "total_loss": [],
         "pde": [],
-        "bc_0": [],
-        "bc_1": [],
     }
+    for i in range(n_bc):
+        history[f"bc_{i}"] = []
 
     start_time = time.time()
 
     for epoch in range(max_epochs):
-        # Один шаг обучения
-        losses = pinn.train_step(x_collocation, pde_fn, bc_fns, phys)
+        losses = pinn.train_step(x_collocation, pde_fn, bc_configs, phys)
 
         current_loss = losses.get(monitor, losses["total_loss"])
 
-        # Сохранение истории
         history["steps"].append(epoch)
         history["total_loss"].append(float(losses["total_loss"]))
         history["pde"].append(float(losses["pde"]))
-        history["bc_0"].append(float(losses["bc_0"]))
-        history["bc_1"].append(float(losses["bc_1"]))
+        for i in range(n_bc):
+            key = f"bc_{i}"
+            if key in losses:
+                history[key].append(float(losses[key]))
 
-        # Проверка улучшения
         if current_loss < best_loss - min_delta:
             best_loss = current_loss
             epochs_without_improvement = 0
-            # Сохранение лучшего состояния модели
             best_state = nnx.state(pinn.net)
         else:
             epochs_without_improvement += 1
 
-        # Ранняя остановка
         if epochs_without_improvement >= patience:
             print(f"Early stopping на эпохе {epoch}. Лучшая потеря: {best_loss:.6f}")
             break
 
-    # Восстановление лучших весов
     if best_state is not None:
         nnx.update(pinn.net, best_state)
 

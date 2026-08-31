@@ -1,4 +1,4 @@
-"""Boundary condition functions for 1D heat conduction problems."""
+"""Boundary condition functions for 1D/2D/3D problems."""
 
 from __future__ import annotations
 
@@ -7,99 +7,92 @@ import jax.numpy as jnp
 
 
 @jax.jit
-def dirichlet_bc(model, x, T):
+def dirichlet_bc(model, points, values):
     """
-    Вычисляет среднюю квадратичную невязку граничного условия Дирихле.
+    Вычисляет невязки граничного условия Дирихле.
 
     Parameters
     ----------
     model : nnx.Module
         Нейронная сеть.
-    x : jax.Array
-        Координаты граничных точек формы (n_points, 1).
-    T : float | jax.Array
+    points : jax.Array
+        Координаты граничных точек формы (n_points, D).
+    values : float | jax.Array
         Заданное значение температуры на границе.
 
     Returns
     -------
-    float
-        Средняя квадратичная невязка (1/N * sum((T_pred - T)^2)).
+    jax.Array
+        Массив невязок формы (n_points,).
     """
-
-    # Векторизованное предсказание сети
-    def predict(xi):
-        return model(jnp.atleast_2d(xi)).ravel()[0]
-
-    # Вычисляем невязки для всех точек сразу через vmap
-    residuals = jax.vmap(lambda xi: (predict(xi) - T) ** 2)(x.ravel())
-    return jnp.mean(residuals)
+    T_pred = model(points).ravel()
+    return T_pred - values
 
 
 @jax.jit
-def neuman_bc(model, x, g):
+def neumann_bc(model, points, normals, flux_values):
     """
-    Вычисляет среднюю квадратичную невязку граничного условия Неймана.
+    Вычисляет невязки граничного условия Неймана.
 
     Parameters
     ----------
     model : nnx.Module
         Нейронная сеть.
-    x : jax.Array
-        Координаты граничных точек формы (n_points, 1).
-    g : float | jax.Array
-        Заданное значение градиента температуры на границе.
+    points : jax.Array
+        Координаты граничных точек формы (n_points, D).
+    normals : jax.Array
+        Единичные нормали формы (n_points, D).
+    flux_values : float | jax.Array
+        Заданное значение потока на границе.
 
     Returns
     -------
-    float
-        Средняя квадратичная невязка (1/N * sum((dT/dx - g)^2)).
+    jax.Array
+        Массив невязок формы (n_points,).
     """
+    def predict(x):
+        return model(jnp.atleast_2d(x)).ravel()[0]
 
-    def predict(xi):
-        return model(jnp.atleast_2d(xi)).ravel()[0]
+    def grad_predict(x):
+        return jax.grad(predict)(x)
 
-    # Векторизованный градиент
-    grad_predict = jax.grad(predict)
-
-    # Вычисляем невязки для всех точек
-    residuals = jax.vmap(lambda xi: (grad_predict(xi) - g) ** 2)(x.ravel())
-    return jnp.mean(residuals)
+    grads = jax.vmap(grad_predict)(points)
+    normal_deriv = jnp.sum(grads * normals, axis=1)
+    return normal_deriv - flux_values
 
 
 @jax.jit
-def robin_bc(model, x, alpha, beta, h):
+def robin_bc(model, points, normals, alpha, beta, value):
     """
-    Вычисляет среднюю квадратичную невязку граничного условия Робина.
+    Вычисляет невязки граничного условия Робина.
 
     Parameters
     ----------
     model : nnx.Module
         Нейронная сеть.
-    x : jax.Array
-        Координаты граничных точек формы (n_points, 1).
+    points : jax.Array
+        Координаты граничных точек формы (n_points, D).
+    normals : jax.Array
+        Единичные нормали формы (n_points, D).
     alpha : float
         Коэффициент при температуре.
     beta : float
         Коэффициент при градиенте температуры.
-    h : float
+    value : float
         Заданное значение комбинации.
 
     Returns
     -------
-    float
-        Средняя квадратичная невязка (1/N * sum((alpha*T + beta*dT/dx - h)^2)).
+    jax.Array
+        Массив невязок формы (n_points,).
     """
+    def predict(x):
+        return model(jnp.atleast_2d(x)).ravel()[0]
 
-    def predict(xi):
-        return model(jnp.atleast_2d(xi)).ravel()[0]
+    def grad_predict(x):
+        return jax.grad(predict)(x)
 
-    grad_predict = jax.grad(predict)
-
-    # Векторизованное вычисление невязки
-    def compute_residual(xi):
-        T_val = predict(xi)
-        dT_dx = grad_predict(xi)
-        return (alpha * T_val + beta * dT_dx - h) ** 2
-
-    residuals = jax.vmap(compute_residual)(x.ravel())
-    return jnp.mean(residuals)
+    grads = jax.vmap(grad_predict)(points)
+    T_vals = jax.vmap(predict)(points)
+    normal_deriv = jnp.sum(grads * normals, axis=1)
+    return alpha * T_vals + beta * normal_deriv - value

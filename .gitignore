@@ -18,13 +18,7 @@ __pycache__/
 .vscode/
 .idea/
 
-# Coverage
-.coverage
-coverage/
-htmlcov/
-
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
+# Dependencies
+.venv/
+venv/
 ```
