@@ -33,9 +33,11 @@ class TestPINNIntegration:
             pde_residual = line_1d(model, x_col, phys=None)
             pde_loss = jnp.mean(pde_residual**2)
 
-            # BC losses
-            bc_left_loss = dirichlet_bc(model, x0, 0.0)
-            bc_right_loss = dirichlet_bc(model, x1, 1.0)
+            # BC losses (mean squared residuals)
+            bc_left_residual = dirichlet_bc(model, x0, 0.0)
+            bc_right_residual = dirichlet_bc(model, x1, 1.0)
+            bc_left_loss = jnp.mean(bc_left_residual**2)
+            bc_right_loss = jnp.mean(bc_right_residual**2)
 
             total_loss = pde_loss + bc_left_loss + bc_right_loss
             return total_loss
@@ -62,8 +64,10 @@ class TestPINNIntegration:
             pde_residual = line_1d(model, x_collocation, phys=None)
             pde_loss = jnp.mean(pde_residual**2)
 
-            bc_left_loss = dirichlet_bc(model, x_bc_left, 0.0)
-            bc_right_loss = dirichlet_bc(model, x_bc_right, 1.0)
+            bc_left_residual = dirichlet_bc(model, x_bc_left, 0.0)
+            bc_right_residual = dirichlet_bc(model, x_bc_right, 1.0)
+            bc_left_loss = jnp.mean(bc_left_residual**2)
+            bc_right_loss = jnp.mean(bc_right_residual**2)
 
             return pde_loss + bc_left_loss + bc_right_loss
 
@@ -111,8 +115,10 @@ class TestPINNIntegration:
         def loss_fn(model):
             pde_residual = line_1d(model, x_collocation, phys=None)
             pde_loss = jnp.mean(pde_residual**2)
-            bc_left_loss = dirichlet_bc(model, x_bc_left, 0.0)
-            bc_right_loss = dirichlet_bc(model, x_bc_right, 1.0)
+            bc_left_residual = dirichlet_bc(model, x_bc_left, 0.0)
+            bc_right_residual = dirichlet_bc(model, x_bc_right, 1.0)
+            bc_left_loss = jnp.mean(bc_left_residual**2)
+            bc_right_loss = jnp.mean(bc_right_residual**2)
             return pde_loss + bc_left_loss + bc_right_loss
 
         # JIT compile

@@ -1,1 +1,32 @@
-Nothing needs to be added to the .gitignore file since only test Python files were modified and no build artifacts, dependencies, or temporary files are present in the changes.
+```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Tests
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+
+# Environment
+.venv/
+venv/
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+```
