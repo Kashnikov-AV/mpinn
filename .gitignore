@@ -1,4 +1,3 @@
-```
 # Python
 __pycache__/
 *.pyc
@@ -19,7 +18,13 @@ __pycache__/
 .vscode/
 .idea/
 
-# Dependencies
-.venv/
-venv/
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
 ```
