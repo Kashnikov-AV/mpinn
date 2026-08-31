@@ -14,7 +14,17 @@ class Geometry(ABC):
         pass
 
     @abstractmethod
-    def sample_boundary(self):
+    def sample_boundary(self, n_points=None, method="random", rng=None):
+        """
+        Генерирует точки на границе и соответствующие нормали.
+
+        Returns
+        -------
+        tuple[jax.Array, jax.Array]
+            Кортеж (points, normals), где:
+            - points: массив координат формы (N, D)
+            - normals: массив единичных нормалей формы (N, D)
+        """
         pass
 
     def plot_domain(
@@ -158,8 +168,22 @@ class Interval(Geometry):
             return jnp.linspace(self.x0, self.x1, n_points).reshape(-1, 1)
         raise ValueError(f"Unknown method: {method}")
 
-    def sample_boundary(self):
-        return jnp.array([[self.x0], [self.x1]])
+    def sample_boundary(self, n_points=None, method="random", rng=None):
+        """
+        Генерирует точки на границе интервала и соответствующие нормали.
+
+        В 1D случае нормаль - это скаляр: -1 для левой границы, +1 для правой.
+
+        Returns
+        -------
+        tuple[jax.Array, jax.Array]
+            Кортеж (points, normals), где:
+            - points: массив координат формы (2, 1)
+            - normals: массив нормалей формы (2, 1), [-1, 0], [1, 0]
+        """
+        points = jnp.array([[self.x0], [self.x1]])
+        normals = jnp.array([[-1.0], [1.0]])
+        return points, normals
 
     def generate_collocation(self, n_interior=100, method="random", rng=None):
         if rng is None:
@@ -167,9 +191,8 @@ class Interval(Geometry):
 
         keys = jax.random.split(rng, 2)
         interior = self.sample_interior(n_interior, method, keys[0])
-        boundary = self.sample_boundary()
+        boundary, _ = self.sample_boundary()
 
-        # Склеиваем внутренние и граничные точки в один массив
         return jnp.vstack([interior, boundary])
 
 
@@ -226,7 +249,7 @@ class Rectangle(Geometry):
 
     def sample_boundary(self, n_points=None, method="random", rng=None):
         """
-        Генерирует точки на границе (периметре) прямоугольника.
+        Генерирует точки на границе (периметре) прямоугольника и нормали.
 
         Если n_points не указан, возвращает четыре угловые точки.
 
@@ -236,14 +259,15 @@ class Rectangle(Geometry):
             rng: ключ PRNG.
 
         Returns:
-            Массив формы (n_points, 2) или (4, 2) если n_points=None.
+            tuple[jax.Array, jax.Array]:
+                - points: массив формы (n_points, 2) или (4, 2) если n_points=None.
+                - normals: массив единичных нормалей формы (n_points, 2) или (4, 2).
         """
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
         if n_points is None:
-            # Возвращаем четыре угла
-            return jnp.array(
+            points = jnp.array(
                 [
                     [self.x_min, self.y_min],
                     [self.x_max, self.y_min],
@@ -251,45 +275,51 @@ class Rectangle(Geometry):
                     [self.x_min, self.y_max],
                 ]
             )
+            normals = jnp.array(
+                [
+                    [0.0, -1.0],
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [-1.0, 0.0],
+                ]
+            )
+            return points, normals
 
         if method == "random":
-            # Генерируем точки на периметре с равномерным распределением по длине
-            # Вычисляем длины сторон
             dx = self.x_max - self.x_min
             dy = self.y_max - self.y_min
             perimeter = 2 * (dx + dy)
 
-            # Случайные смещения по периметру
             s = jax.random.uniform(rng, (n_points, 1), minval=0.0, maxval=perimeter)
 
-            # Определяем, на какой стороне находится точка
-            # Используем кумулятивные длины: 0..dx (нижняя), dx..dx+dy (правая), dx+dy..2dx+dy (верхняя), 2dx+dy..perimeter (левая)
             points = jnp.zeros((n_points, 2))
-            # Нижняя сторона (y = y_min)
+            normals = jnp.zeros((n_points, 2))
+
             mask1 = s <= dx
             t = s[mask1] / dx
             points = points.at[mask1, 0].set(self.x_min + t * dx)
             points = points.at[mask1, 1].set(self.y_min)
+            normals = normals.at[mask1].set(jnp.array([0.0, -1.0]))
 
-            # Правая сторона (x = x_max)
             mask2 = (s > dx) & (s <= dx + dy)
             t = (s[mask2] - dx) / dy
             points = points.at[mask2, 0].set(self.x_max)
             points = points.at[mask2, 1].set(self.y_min + t * dy)
+            normals = normals.at[mask2].set(jnp.array([1.0, 0.0]))
 
-            # Верхняя сторона (y = y_max)
             mask3 = (s > dx + dy) & (s <= 2 * dx + dy)
             t = (s[mask3] - dx - dy) / dx
             points = points.at[mask3, 0].set(self.x_max - t * dx)
             points = points.at[mask3, 1].set(self.y_max)
+            normals = normals.at[mask3].set(jnp.array([0.0, 1.0]))
 
-            # Левая сторона (x = x_min)
             mask4 = s > 2 * dx + dy
             t = (s[mask4] - 2 * dx - dy) / dy
             points = points.at[mask4, 0].set(self.x_min)
             points = points.at[mask4, 1].set(self.y_max - t * dy)
+            normals = normals.at[mask4].set(jnp.array([-1.0, 0.0]))
 
-            return points
+            return points, normals
 
         raise ValueError(f"Unknown method: {method}")
 
@@ -318,7 +348,7 @@ class Rectangle(Geometry):
             rng = jax.random.PRNGKey(0)
         keys = jax.random.split(rng, 2)
         interior = self.sample_interior(n_interior, method_interior, keys[0])
-        boundary = self.sample_boundary(n_boundary, method_boundary, keys[1])
+        boundary, _ = self.sample_boundary(n_boundary, method_boundary, keys[1])
         return jnp.vstack([interior, boundary])
 
 
@@ -357,44 +387,45 @@ class Box(Geometry):
         raise ValueError(f"Unknown method: {method}")
 
     def sample_boundary(self, n_points=None, method="random", rng=None):
-        """Генерирует точки на границе параллелепипеда"""
+        """Генерирует точки на границе параллелепипеда и нормали."""
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
         if n_points is None:
-            # Возвращаем 8 углов
             corners = []
+            normals_list = []
             for x in [self.x_min, self.x_max]:
                 for y in [self.y_min, self.y_max]:
                     for z in [self.z_min, self.z_max]:
                         corners.append([x, y, z])
-            return jnp.array(corners)
+                        nx = -1.0 if x == self.x_min else 1.0
+                        ny = -1.0 if y == self.y_min else 1.0
+                        nz = -1.0 if z == self.z_min else 1.0
+                        normals_list.append([nx, ny, nz])
+            return jnp.array(corners), jnp.array(normals_list)
 
         if method == "random":
-            # Генерируем точки на 6 гранях
             dx = self.x_max - self.x_min
             dy = self.y_max - self.y_min
             dz = self.z_max - self.z_min
 
-            # Площадь граней
             areas = [
-                dx * dy,  # bottom (z=z_min)
-                dx * dy,  # top (z=z_max)
-                dx * dz,  # front (y=y_min)
-                dx * dz,  # back (y=y_max)
-                dy * dz,  # left (x=x_min)
-                dy * dz,  # right (x=x_max)
+                dx * dy,
+                dx * dy,
+                dx * dz,
+                dx * dz,
+                dy * dz,
+                dy * dz,
             ]
             total_area = sum(areas)
 
-            # Распределяем точки пропорционально площадям
             points_per_face = [int(n_points * a / total_area) for a in areas]
-            points_per_face[-1] += n_points - sum(points_per_face)  # корректировка
+            points_per_face[-1] += n_points - sum(points_per_face)
 
             all_points = []
+            all_normals = []
             keys = jax.random.split(rng, 6)
 
-            # Bottom (z=z_min)
             if points_per_face[0] > 0:
                 x = jax.random.uniform(
                     keys[0],
@@ -410,8 +441,8 @@ class Box(Geometry):
                 )
                 z = jnp.full((points_per_face[0], 1), self.z_min)
                 all_points.append(jnp.hstack([x, y, z]))
+                all_normals.append(jnp.tile(jnp.array([0.0, 0.0, -1.0]), (points_per_face[0], 1)))
 
-            # Top (z=z_max)
             if points_per_face[1] > 0:
                 x = jax.random.uniform(
                     keys[2],
@@ -427,8 +458,8 @@ class Box(Geometry):
                 )
                 z = jnp.full((points_per_face[1], 1), self.z_max)
                 all_points.append(jnp.hstack([x, y, z]))
+                all_normals.append(jnp.tile(jnp.array([0.0, 0.0, 1.0]), (points_per_face[1], 1)))
 
-            # Front (y=y_min)
             if points_per_face[2] > 0:
                 x = jax.random.uniform(
                     keys[4],
@@ -444,8 +475,8 @@ class Box(Geometry):
                 )
                 y = jnp.full((points_per_face[2], 1), self.y_min)
                 all_points.append(jnp.hstack([x, y, z]))
+                all_normals.append(jnp.tile(jnp.array([0.0, -1.0, 0.0]), (points_per_face[2], 1)))
 
-            # Back (y=y_max)
             if points_per_face[3] > 0:
                 x = jax.random.uniform(
                     keys[0],
@@ -461,8 +492,8 @@ class Box(Geometry):
                 )
                 y = jnp.full((points_per_face[3], 1), self.y_max)
                 all_points.append(jnp.hstack([x, y, z]))
+                all_normals.append(jnp.tile(jnp.array([0.0, 1.0, 0.0]), (points_per_face[3], 1)))
 
-            # Left (x=x_min)
             if points_per_face[4] > 0:
                 y = jax.random.uniform(
                     keys[2],
@@ -478,8 +509,8 @@ class Box(Geometry):
                 )
                 x = jnp.full((points_per_face[4], 1), self.x_min)
                 all_points.append(jnp.hstack([x, y, z]))
+                all_normals.append(jnp.tile(jnp.array([-1.0, 0.0, 0.0]), (points_per_face[4], 1)))
 
-            # Right (x=x_max)
             if points_per_face[5] > 0:
                 y = jax.random.uniform(
                     keys[4],
@@ -495,8 +526,9 @@ class Box(Geometry):
                 )
                 x = jnp.full((points_per_face[5], 1), self.x_max)
                 all_points.append(jnp.hstack([x, y, z]))
+                all_normals.append(jnp.tile(jnp.array([1.0, 0.0, 0.0]), (points_per_face[5], 1)))
 
-            return jnp.vstack(all_points)
+            return jnp.vstack(all_points), jnp.vstack(all_normals)
 
         raise ValueError(f"Unknown method: {method}")
 
@@ -513,7 +545,7 @@ class Box(Geometry):
             rng = jax.random.PRNGKey(0)
         keys = jax.random.split(rng, 2)
         interior = self.sample_interior(n_interior, method_interior, keys[0])
-        boundary = self.sample_boundary(n_boundary, method_boundary, keys[1])
+        boundary, _ = self.sample_boundary(n_boundary, method_boundary, keys[1])
         return jnp.vstack([interior, boundary])
 
 
@@ -578,5 +610,5 @@ class Sphere(Geometry):
             rng = jax.random.PRNGKey(0)
         keys = jax.random.split(rng, 2)
         interior = self.sample_interior(n_interior, method_interior, keys[0])
-        boundary = self.sample_boundary(n_boundary, method_boundary, keys[1])
+        boundary, _ = self.sample_boundary(n_boundary, method_boundary, keys[1])
         return jnp.vstack([interior, boundary])

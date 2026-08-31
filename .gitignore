@@ -3,7 +3,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
+*.whl
+*.gz
 # Logs and temp files
 *.log
 *.tmp
@@ -26,3 +27,4 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+```
