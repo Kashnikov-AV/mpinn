@@ -42,7 +42,7 @@ def _plot_1d(interior, boundary=None, interface=None, title="Domain Visualizatio
             c="blue",
             s=30,
             alpha=0.5,
-            label="Interior",
+            label="Внутренние точки",
         )
 
     # Граничные точки - зеленые
@@ -57,7 +57,7 @@ def _plot_1d(interior, boundary=None, interface=None, title="Domain Visualizatio
             c="green",
             s=50,
             alpha=0.7,
-            label="Boundary",
+            label="Граница",
         )
 
     # Точки на интерфейсах - красные
@@ -68,7 +68,7 @@ def _plot_1d(interior, boundary=None, interface=None, title="Domain Visualizatio
             c="red",
             s=50,
             alpha=0.7,
-            label="Interface",
+            label="Интерфейс",
         )
 
     plt.xlabel("x")
@@ -92,7 +92,7 @@ def _plot_2d(interior, boundary=None, interface=None, title="Domain Visualizatio
             c="blue",
             s=10,
             alpha=0.5,
-            label="Interior",
+            label="Внутренние точки",
         )
 
     # Граничные точки - зеленые
@@ -105,7 +105,7 @@ def _plot_2d(interior, boundary=None, interface=None, title="Domain Visualizatio
                 c="green",
                 s=20,
                 alpha=0.7,
-                label="Boundary",
+                label="Граница",
             )
 
             if show_normals:
@@ -129,7 +129,7 @@ def _plot_2d(interior, boundary=None, interface=None, title="Domain Visualizatio
                 c="green",
                 s=20,
                 alpha=0.7,
-                label="Boundary",
+                label="Граница",
             )
 
     # Точки на интерфейсах - красные
@@ -140,7 +140,7 @@ def _plot_2d(interior, boundary=None, interface=None, title="Domain Visualizatio
             c="red",
             s=20,
             alpha=0.7,
-            label="Interface",
+            label="Интерфейс",
         )
 
     plt.xlabel("x")
@@ -167,7 +167,7 @@ def _plot_3d(interior, boundary=None, interface=None, title="Domain Visualizatio
             c="blue",
             s=10,
             alpha=0.5,
-            label="Interior",
+            label="Внутренние точки",
         )
 
     # Граничные точки - зеленые
@@ -183,7 +183,7 @@ def _plot_3d(interior, boundary=None, interface=None, title="Domain Visualizatio
             c="green",
             s=20,
             alpha=0.7,
-            label="Boundary",
+            label="Граница",
         )
 
     # Точки на интерфейсах - красные
@@ -195,7 +195,7 @@ def _plot_3d(interior, boundary=None, interface=None, title="Domain Visualizatio
             c="red",
             s=20,
             alpha=0.7,
-            label="Interface",
+            label="Интерфейс",
         )
 
     ax.set_xlabel("x")
