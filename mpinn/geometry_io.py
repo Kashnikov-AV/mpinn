@@ -1,11 +1,11 @@
 """
-Geometry I/O module for loading complex geometries from files.
+Модуль ввода/вывода геометрии для загрузки сложных геометрий из файлов.
 
-Supports formats:
-- STL (stereolithography) - surface mesh
-- OBJ (Wavefront) - surface mesh with normals
-- Gmsh (.msh) - volume mesh with boundary markers
-- JSON custom format - simple geometries
+Поддерживаемые форматы:
+- STL (стереолитография) - поверхностная сетка
+- OBJ (Wavefront) - поверхностная сетка с нормалями
+- Gmsh (.msh) - объёмная сетка с маркерами границ
+- JSON пользовательский формат - простые геометрии
 """
 
 import struct
@@ -17,26 +17,26 @@ import numpy as np
 
 @dataclass
 class MeshData:
-    """Container for mesh data loaded from file."""
+    """Контейнер для данных сетки, загруженных из файла."""
 
-    vertices: np.ndarray  # (N, dim) array of vertex coordinates
-    faces: np.ndarray  # (M, 3) or (M, 4) array of face indices
-    normals: np.ndarray | None = None  # (M, 3) face normals
-    boundary_markers: dict[str, np.ndarray] | None = None  # boundary face groups
-    volume_markers: dict[str, np.ndarray] | None = None  # volume element groups
-    dim: int = 3  # dimension of the geometry
+    vertices: np.ndarray  # Массив координат вершин формы (N, dim)
+    faces: np.ndarray  # Массив индексов граней формы (M, 3) или (M, 4)
+    normals: np.ndarray | None = None  # Нормали граней формы (M, 3)
+    boundary_markers: dict[str, np.ndarray] | None = None  # Группы граничных граней
+    volume_markers: dict[str, np.ndarray] | None = None  # Группы объёмных элементов
+    dim: int = 3  # Размерность геометрии
 
 
 def load_stl(filepath: str, compute_normals: bool = True) -> MeshData:
     """
-    Load geometry from STL file (binary or ASCII).
+    Загрузка геометрии из STL файла (бинарный или ASCII).
 
     Args:
-        filepath: Path to .stl file
-        compute_normals: Whether to compute face normals automatically
+        filepath: Путь к файлу .stl
+        compute_normals: Вычислять ли нормали граней автоматически
 
     Returns:
-        MeshData with vertices and faces
+        MeshData с вершинами и гранями
     """
     with open(filepath, "rb") as f:
         f.read(80)
@@ -103,14 +103,14 @@ def load_stl(filepath: str, compute_normals: bool = True) -> MeshData:
 
 def load_obj(filepath: str, compute_normals: bool = True) -> MeshData:
     """
-    Load geometry from Wavefront OBJ file.
+    Загрузка геометрии из Wavefront OBJ файла.
 
     Args:
-        filepath: Path to .obj file
-        compute_normals: Whether to compute face normals if not present
+        filepath: Путь к файлу .obj
+        compute_normals: Вычислять ли нормали граней, если они отсутствуют
 
     Returns:
-        MeshData with vertices, faces, and optionally normals
+        MeshData с вершинами, гранями и опционально нормалями
     """
     vertices = []
     faces = []
@@ -190,13 +190,13 @@ def load_obj(filepath: str, compute_normals: bool = True) -> MeshData:
 
 def load_gmsh(filepath: str) -> MeshData:
     """
-    Load geometry from Gmsh .msh file (version 2.x or 4.x).
+    Загрузка геометрии из Gmsh .msh файла (версия 2.x или 4.x).
 
     Args:
-        filepath: Path to .msh file
+        filepath: Путь к файлу .msh
 
     Returns:
-        MeshData with vertices, elements, and boundary markers
+        MeshData с вершинами, элементами и маркерами границ
     """
     with open(filepath, "r") as f:
         lines = f.readlines()
@@ -307,15 +307,15 @@ def load_gmsh(filepath: str) -> MeshData:
 
 def load_geometry(filepath: str, file_format: str | None = None, **kwargs) -> MeshData:
     """
-    Auto-detect file format and load geometry.
+    Автоопределение формата файла и загрузка геометрии.
 
     Args:
-        filepath: Path to geometry file
-        file_format: Optional format override ('stl', 'obj', 'gmsh')
-        **kwargs: Additional arguments passed to specific loaders
+        filepath: Путь к файлу геометрии
+        file_format: Опциональное переопределение формата ('stl', 'obj', 'gmsh')
+        **kwargs: Дополнительные аргументы, передаваемые конкретным загрузчикам
 
     Returns:
-        MeshData object
+        Объект MeshData
     """
     if file_format is None:
         ext = filepath.lower().split(".")[-1]
@@ -335,14 +335,14 @@ def load_geometry(filepath: str, file_format: str | None = None, **kwargs) -> Me
 
 def compute_face_normals(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
     """
-    Compute face normals for a mesh.
+    Вычисление нормалей граней для сетки.
 
     Args:
-        vertices: (N, 3) array of vertex coordinates
-        faces: (M, 3) array of face indices
+        vertices: Массив координат вершин формы (N, 3)
+        faces: Массив индексов граней формы (M, 3)
 
     Returns:
-        (M, 3) array of unit face normals
+        Массив единичных нормалей граней формы (M, 3)
     """
     v0 = vertices[faces[:, 0]]
     v1 = vertices[faces[:, 1]]
@@ -362,17 +362,17 @@ def sample_points_on_surface(
     mesh: MeshData, n_points: int, rng: jnp.ndarray | None = None
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """
-    Sample points uniformly on mesh surface with corresponding normals.
+    Равномерное сэмплирование точек на поверхности сетки с соответствующими нормалями.
 
     Args:
-        mesh: MeshData object
-        n_points: Number of points to sample
-        rng: JAX random key
+        mesh: Объект MeshData
+        n_points: Количество точек для сэмплирования
+        rng: Случайный ключ JAX
 
     Returns:
-        Tuple of (points, normals) where:
-            - points: (n_points, 3) array of sampled coordinates
-            - normals: (n_points, 3) array of interpolated normals
+        Кортеж из (points, normals), где:
+            - points: Массив сэмплированных координат формы (n_points, 3)
+            - normals: Массив интерполированных нормалей формы (n_points, 3)
     """
     if rng is None:
         rng = jnp.array([0, 0])
