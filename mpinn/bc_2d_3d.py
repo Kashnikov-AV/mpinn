@@ -1,13 +1,13 @@
 """
-Boundary conditions for 2D and 3D problems with normal derivatives.
+Граничные условия для 2D и 3D задач с нормальными производными.
 
-Supports:
-- Dirichlet BC: T = T_bc on boundary
-- Neumann BC: ∂T/∂n = g on boundary (normal derivative)
-- Robin BC: αT + β(∂T/∂n) = h on boundary
+Поддерживаются:
+- Условие Дирихле: T = T_bc на границе
+- Условие Неймана: ∂T/∂n = g на границе (нормальная производная)
+- Условие Робина: αT + β(∂T/∂n) = h на границе
 
-Key feature: Normal derivative ∂T/∂n = ∇T · n computed using
-automatic differentiation and provided normal vectors.
+Ключевая особенность: Нормальная производная ∂T/∂n = ∇T · n вычисляется
+с использованием автоматического дифференцирования и предоставленных векторов нормалей.
 """
 
 from collections.abc import Callable
@@ -18,15 +18,15 @@ import jax.numpy as jnp
 
 def dirichlet_bc_2d(model, points: jnp.ndarray, bc_value: float | Callable) -> float:
     """
-    Dirichlet boundary condition in 2D: T(x,y) = T_bc
+    Условие Дирихле в 2D: T(x,y) = T_bc
 
     Args:
-        model: Neural network model
-        points: Boundary points of shape (n_points, 2)
-        bc_value: Constant value or function T_bc(x, y)
+        model: Модель нейронной сети
+        points: Граничные точки формы (n_points, 2)
+        bc_value: Константное значение или функция T_bc(x, y)
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):
@@ -48,15 +48,15 @@ def dirichlet_bc_2d(model, points: jnp.ndarray, bc_value: float | Callable) -> f
 
 def dirichlet_bc_3d(model, points: jnp.ndarray, bc_value: float | Callable) -> float:
     """
-    Dirichlet boundary condition in 3D: T(x,y,z) = T_bc
+    Условие Дирихле в 3D: T(x,y,z) = T_bc
 
     Args:
-        model: Neural network model
-        points: Boundary points of shape (n_points, 3)
-        bc_value: Constant value or function T_bc(x, y, z)
+        model: Модель нейронной сети
+        points: Граничные точки формы (n_points, 3)
+        bc_value: Константное значение или функция T_bc(x, y, z)
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):
@@ -78,18 +78,18 @@ def neumann_bc_2d(
     model, points: jnp.ndarray, normals: jnp.ndarray, flux_value: float | Callable
 ) -> float:
     """
-    Neumann boundary condition in 2D: ∂T/∂n = g
+    Условие Неймана в 2D: ∂T/∂n = g
 
-    The normal derivative is computed as ∂T/∂n = ∇T · n
+    Нормальная производная вычисляется как ∂T/∂n = ∇T · n
 
     Args:
-        model: Neural network model
-        points: Boundary points of shape (n_points, 2)
-        normals: Unit normal vectors of shape (n_points, 2)
-        flux_value: Prescribed normal derivative g (constant or function)
+        model: Модель нейронной сети
+        points: Граничные точки формы (n_points, 2)
+        normals: Единичные векторы нормалей формы (n_points, 2)
+        flux_value: Заданная нормальная производная g (константа или функция)
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):
@@ -118,16 +118,16 @@ def neumann_bc_3d(
     model, points: jnp.ndarray, normals: jnp.ndarray, flux_value: float | Callable
 ) -> float:
     """
-    Neumann boundary condition in 3D: ∂T/∂n = g
+    Условие Неймана в 3D: ∂T/∂n = g
 
     Args:
-        model: Neural network model
-        points: Boundary points of shape (n_points, 3)
-        normals: Unit normal vectors of shape (n_points, 3)
-        flux_value: Prescribed normal derivative g
+        model: Модель нейронной сети
+        points: Граничные точки формы (n_points, 3)
+        normals: Единичные векторы нормалей формы (n_points, 3)
+        flux_value: Заданная нормальная производная g
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):
@@ -161,22 +161,22 @@ def robin_bc_2d(
     h: float | Callable,
 ) -> float:
     """
-    Robin boundary condition in 2D: αT + β(∂T/∂n) = h
+    Условие Робина в 2D: αT + β(∂T/∂n) = h
 
-    Common form for convective heat transfer:
+    Обычная форма для конвективного теплообмена:
     -k(∂T/∂n) = h_conv(T - T_inf)
-    which can be rewritten as: h_conv*T + k*(∂T/∂n) = h_conv*T_inf
+    что может быть переписано как: h_conv*T + k*(∂T/∂n) = h_conv*T_inf
 
     Args:
-        model: Neural network model
-        points: Boundary points of shape (n_points, 2)
-        normals: Unit normal vectors of shape (n_points, 2)
-        alpha: Coefficient for T term
-        beta: Coefficient for normal derivative term
-        h: RHS value (constant or function)
+        model: Модель нейронной сети
+        points: Граничные точки формы (n_points, 2)
+        normals: Единичные векторы нормалей формы (n_points, 2)
+        alpha: Коэффициент при члене с T
+        beta: Коэффициент при члене с нормальной производной
+        h: Значение правой части (константа или функция)
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):
@@ -212,18 +212,18 @@ def robin_bc_3d(
     h: float | Callable,
 ) -> float:
     """
-    Robin boundary condition in 3D: αT + β(∂T/∂n) = h
+    Условие Робина в 3D: αT + β(∂T/∂n) = h
 
     Args:
-        model: Neural network model
-        points: Boundary points of shape (n_points, 3)
-        normals: Unit normal vectors of shape (n_points, 3)
-        alpha: Coefficient for T term
-        beta: Coefficient for normal derivative term
-        h: RHS value
+        model: Модель нейронной сети
+        points: Граничные точки формы (n_points, 3)
+        normals: Единичные векторы нормалей формы (n_points, 3)
+        alpha: Коэффициент при члене с T
+        beta: Коэффициент при члене с нормальной производной
+        h: Значение правой части
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):
@@ -257,22 +257,22 @@ def interface_continuity_loss(
     lambdas: tuple,
 ) -> tuple[float, float]:
     """
-    Interface conditions between two domains for multi-domain PINN.
+    Условия сопряжения между двумя доменами для многодоменной ФИНС.
 
-    Enforces:
-    1. Temperature continuity: T₁ = T₂
-    2. Flux continuity: λ₁(∂T₁/∂n) = λ₂(∂T₂/∂n)
+    Обеспечивает:
+    1. Непрерывность температуры: T₁ = T₂
+    2. Непрерывность потока: λ₁(∂T₁/∂n) = λ₂(∂T₂/∂n)
 
-    Based on XPINN/cPINN formulations (Jagtap & Karniadakis, 2020).
+    На основе формулировок XPINN/cPINN (Jagtap & Karniadakis, 2020).
 
     Args:
-        models: Tuple of two neural networks (model_1, model_2)
-        interface_points: Points on the interface of shape (n_points, dim)
-        interface_normals: Unit normals pointing from domain 1 to domain 2
-        lambdas: Tuple of conductivity coefficients (lambda_1, lambda_2)
+        models: Кортеж из двух нейронных сетей (model_1, model_2)
+        interface_points: Точки на интерфейсе формы (n_points, dim)
+        interface_normals: Единичные нормали, направленные от домена 1 к домену 2
+        lambdas: Кортеж коэффициентов теплопроводности (lambda_1, lambda_2)
 
     Returns:
-        Tuple of (temperature_continuity_loss, flux_continuity_loss)
+        Кортеж (потеря_непрерывности_температуры, потеря_непрерывности_потока)
     """
     model_1, model_2 = models
     lambda_1, lambda_2 = lambdas
@@ -319,21 +319,21 @@ def interface_continuity_loss_nd(
     models: tuple, interface_data: dict, all_lambdas: tuple, weights: tuple = (1.0, 1.0)
 ) -> float:
     """
-    Generalized interface loss for multiple interfaces in N dimensions.
+    Обобщенная потеря на интерфейсе для нескольких интерфейсов в N измерениях.
 
-    XPINN-style formulation supporting arbitrary number of interfaces.
+    Формулировка в стиле XPINN с поддержкой произвольного количества интерфейсов.
 
     Args:
-        models: Tuple of neural networks for each domain
-        interface_data: List of dicts with keys:
-            - 'points': interface collocation points
-            - 'normals': normal vectors
-            - 'domains': tuple of domain indices (i, j) sharing this interface
-        all_lambdas: Tuple of conductivity values for each domain
-        weights: Weights for (temperature, flux) continuity
+        models: Кортеж нейронных сетей для каждого домена
+        interface_data: Список словарей с ключами:
+            - 'points': точки коллокации на интерфейсе
+            - 'normals': векторы нормалей
+            - 'domains': кортеж индексов доменов (i, j), разделяющих этот интерфейс
+        all_lambdas: Кортеж значений теплопроводности для каждого домена
+        weights: Веса для непрерывности (температура, поток)
 
     Returns:
-        Total interface loss
+        Полная потеря на интерфейсе
     """
     total_loss = 0.0
     w_temp, w_flux = weights
@@ -367,21 +367,21 @@ def convective_bc_2d(
     k: float,
 ) -> float:
     """
-    Convective boundary condition (Robin type) in 2D:
+    Конвективное граничное условие (тип Робина) в 2D:
     -k(∂T/∂n) = h_conv(T - T_inf)
 
-    Rearranged: h_conv*T + k*(∂T/∂n) = h_conv*T_inf
+    В переписанном виде: h_conv*T + k*(∂T/∂n) = h_conv*T_inf
 
     Args:
-        model: Neural network model
-        points: Boundary points
-        normals: Outward unit normals
-        h_conv: Convective heat transfer coefficient
-        T_inf: Ambient temperature
-        k: Thermal conductivity of the solid
+        model: Модель нейронной сети
+        points: Граничные точки
+        normals: Внешние единичные нормали
+        h_conv: Коэффициент конвективной теплоотдачи
+        T_inf: Температура окружающей среды
+        k: Теплопроводность твердого тела
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
     return robin_bc_2d(model, points, normals, alpha=h_conv, beta=k, h=h_conv * T_inf)
 
@@ -395,18 +395,18 @@ def convective_bc_3d(
     k: float,
 ) -> float:
     """
-    Convective boundary condition in 3D.
+    Конвективное граничное условие в 3D.
 
     Args:
-        model: Neural network model
-        points: Boundary points
-        normals: Outward unit normals
-        h_conv: Convective heat transfer coefficient
-        T_inf: Ambient temperature
-        k: Thermal conductivity
+        model: Модель нейронной сети
+        points: Граничные точки
+        normals: Внешние единичные нормали
+        h_conv: Коэффициент конвективной теплоотдачи
+        T_inf: Температура окружающей среды
+        k: Теплопроводность
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
     return robin_bc_3d(model, points, normals, alpha=h_conv, beta=k, h=h_conv * T_inf)
 
@@ -421,22 +421,22 @@ def radiation_bc_2d(
     k: float,
 ) -> float:
     """
-    Radiative boundary condition (nonlinear Robin type) in 2D:
+    Радиационное граничное условие (нелинейный тип Робина) в 2D:
     -k(∂T/∂n) = εσ(T⁴ - T_surround⁴)
 
-    This is nonlinear in T and requires special treatment.
+    Это нелинейное условие по T и требует специальной обработки.
 
     Args:
-        model: Neural network model
-        points: Boundary points
-        normals: Outward unit normals
-        epsilon: Emissivity
-        sigma: Stefan-Boltzmann constant
-        T_surround: Surrounding temperature
-        k: Thermal conductivity
+        model: Модель нейронной сети
+        points: Граничные точки
+        normals: Внешние единичные нормали
+        epsilon: Коэффициент излучения (чернота)
+        sigma: Постоянная Стефана-Больцмана
+        T_surround: Температура окружающей среды
+        k: Теплопроводность
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):

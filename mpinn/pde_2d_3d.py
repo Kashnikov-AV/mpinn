@@ -1,14 +1,14 @@
 """
-PDE operators for 2D and 3D problems.
+Операторы PDE для 2D и 3D задач.
 
-Provides vectorized PDE residual functions for:
-- Laplace equation (steady heat conduction)
-- Poisson equation (with source term)
-- Heat equation (transient, using automatic differentiation in time)
-- Convection-diffusion equation
+Предоставляет векторизованные функции невязок PDE для:
+- Уравнения Лапласа (стационарная теплопроводность)
+- Уравнения Пуассона (с членом источника)
+- Уравнения теплопроводности (нестационарное, с использованием автоматического дифференцирования по времени)
+- Уравнения конвекции-диффузии
 
-All functions work with JAX automatic differentiation and support
-arbitrary spatial dimensions (2D/3D).
+Все функции работают с автоматическим дифференцированием JAX и поддерживают
+произвольные пространственные размерности (2D/3D).
 """
 
 from collections.abc import Callable
@@ -20,18 +20,18 @@ import jax.numpy as jnp
 
 def laplacian_2d(model, points: jnp.ndarray, phys: Any | None = None) -> float:
     """
-    Compute Laplacian residual in 2D: ∇²T = ∂²T/∂x² + ∂²T/∂y²
+    Вычисляет невязку лапласиана в 2D: ∇²T = ∂²T/∂x² + ∂²T/∂y²
 
-    For steady heat conduction without source: ∇²T = 0
-    With source: ∇²T + f(x,y) = 0
+    Для стационарной теплопроводности без источника: ∇²T = 0
+    С источником: ∇²T + f(x,y) = 0
 
     Args:
-        model: Neural network model
-        points: Collocation points of shape (n_points, 2)
-        phys: Optional physics parameters with source_fn
+        model: Модель нейронной сети
+        points: Точки коллокации формы (n_points, 2)
+        phys: Необязательные физические параметры с source_fn
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):
@@ -69,15 +69,15 @@ def laplacian_2d(model, points: jnp.ndarray, phys: Any | None = None) -> float:
 
 def laplacian_3d(model, points: jnp.ndarray, phys: Any | None = None) -> float:
     """
-    Compute Laplacian residual in 3D: ∇²T = ∂²T/∂x² + ∂²T/∂y² + ∂²T/∂z²
+    Вычисляет невязку лапласиана в 3D: ∇²T = ∂²T/∂x² + ∂²T/∂y² + ∂²T/∂z²
 
     Args:
-        model: Neural network model
-        points: Collocation points of shape (n_points, 3)
-        phys: Optional physics parameters with source_fn
+        model: Модель нейронной сети
+        points: Точки коллокации формы (n_points, 3)
+        phys: Необязательные физические параметры с source_fn
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):
@@ -117,17 +117,17 @@ def laplacian_3d(model, points: jnp.ndarray, phys: Any | None = None) -> float:
 
 def laplacian_nd(model, points: jnp.ndarray, phys: Any | None = None) -> float:
     """
-    Compute Laplacian residual in arbitrary dimension using trace of Hessian.
+    Вычисляет невязку лапласиана в произвольной размерности с использованием следа Гессиана.
 
-    More efficient than component-wise computation for higher dimensions.
+    Более эффективно, чем покомпонентное вычисление для больших размерностей.
 
     Args:
-        model: Neural network model
-        points: Collocation points of shape (n_points, dim)
-        phys: Optional physics parameters with source_fn
+        model: Модель нейронной сети
+        points: Точки коллокации формы (n_points, dim)
+        phys: Необязательные физические параметры с source_fn
 
     Returns:
-        Mean squared residual
+        Среднеквадратичная невязка
     """
 
     def predict(p):
