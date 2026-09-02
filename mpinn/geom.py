@@ -1219,7 +1219,7 @@ class MeshGeometry(GeometryBase):
             **kwargs: Additional method-specific parameters
 
         Returns:
-            Array of shape (n_points, dim)
+            Array формы (n_points, dim)
         """
         if rng is None:
             rng = jax.random.PRNGKey(0)
@@ -1232,7 +1232,7 @@ class MeshGeometry(GeometryBase):
     def _sample_interior_2d(
         self, n_points: int, method: str, rng: jax.Array, **kwargs
     ) -> jnp.ndarray:
-        """2D interior sampling via rejection."""
+        """Сэмплирование внутренних точек в 2D методом отбраковки."""
         # Rejection sampling in bounding box
         max_attempts = n_points * 100
         keys = jax.random.split(rng, 3)
@@ -1252,7 +1252,7 @@ class MeshGeometry(GeometryBase):
             vertices_2d = self.vertices[:, :2]  # Ensure 2D
 
             def is_inside_triangle(p, v0, v1, v2):
-                """Barycentric coordinate test."""
+                """Тест с использованием барицентрических координат."""
                 v0v1 = v1 - v0
                 v0v2 = v2 - v0
                 v0p = p - v0
@@ -1302,16 +1302,16 @@ class MeshGeometry(GeometryBase):
     def _sample_interior_3d(
         self, n_points: int, method: str, rng: jax.Array, **kwargs
     ) -> jnp.ndarray:
-        """3D interior sampling via rejection or tetrahedral decomposition."""
+        """Сэмплирование внутренних точек в 3D методом отбраковки или тетраэдральной декомпозиции."""
         if method == "tetrahedral" and self.volume_markers is not None:
-            # Sample directly from tetrahedral elements
+            # Сэмплирование напрямую из тетраэдральных элементов
             return self._sample_from_tetrahedra(n_points, rng)
         else:
-            # Rejection sampling
+            # Метод отбраковки
             return self._sample_rejection_3d(n_points, rng)
 
     def _sample_rejection_3d(self, n_points: int, rng: jax.Array) -> jnp.ndarray:
-        """3D rejection sampling in bounding box."""
+        """3D сэмплирование методом отбраковки в ограничивающем параллелепипеде."""
         max_attempts = n_points * 50
         keys = jax.random.split(rng, 3)
 
@@ -1332,7 +1332,7 @@ class MeshGeometry(GeometryBase):
         return points[:n_points]
 
     def _sample_from_tetrahedra(self, n_points: int, rng: jax.Array) -> jnp.ndarray:
-        """Sample from tetrahedral volume mesh."""
+        """Сэмплирование из тетраэдральной объёмной сетки."""
         if self.volume_markers is None:
             return self._sample_rejection_3d(n_points, rng)
 
@@ -1347,29 +1347,29 @@ class MeshGeometry(GeometryBase):
 
         tetrahedra = jnp.array(tetrahedra)
 
-        # Sample tetrahedra uniformly
+        # Сэмплирование тетраэдров равномерно
         n_tet = len(tetrahedra)
         tet_indices = jax.random.choice(rng, n_tet, shape=(n_points,))
         selected_tets = tetrahedra[tet_indices]
 
-        # Sample barycentric coordinates in each tetrahedron
+        # Сэмплирование барицентрических координат в каждом тетраэдре
         keys = jax.random.split(rng, 4)
         r1 = jax.random.uniform(keys[0], (n_points, 1))
         r2 = jax.random.uniform(keys[1], (n_points, 1))
         r3 = jax.random.uniform(keys[2], (n_points, 1))
 
-        # Transform to uniform in tetrahedron
+        # Преобразование к равномерному распределению в тетраэдре
         c1 = 1 - r1 ** (1 / 3)
         c2 = 1 - r2 ** (1 / 2)
         c3 = 1 - r3
 
-        # Get vertices
+        # Получение вершин
         v0 = self.vertices[selected_tets[:, 0]]
         v1 = self.vertices[selected_tets[:, 1]]
         v2 = self.vertices[selected_tets[:, 2]]
         v3 = self.vertices[selected_tets[:, 3]]
 
-        # Interpolate
+        # Интерполяция
         points = (
             c1[:, None] * v0
             + (1 - c1[:, None]) * c2[:, None] * v1
@@ -1387,18 +1387,18 @@ class MeshGeometry(GeometryBase):
         marker: str | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
         """
-        Sample points on the boundary surface.
+        Сэмплирование точек на граничной поверхности.
 
         Args:
-            n_points: Number of points (required for mesh geometries)
-            method: Sampling method ('random', 'uniform')
-            rng: JAX random key
-            marker: Optional boundary marker name to sample specific boundary
+            n_points: Количество точек (требуется для сеточных геометрий)
+            method: Метод сэмплирования ('random', 'uniform')
+            rng: Ключ случайного числа JAX
+            marker: Опциональное имя граничной метки для сэмплирования конкретной границы
 
         Returns:
-            Tuple of (points, normals) where:
-                - points: (n_points, dim) array of boundary coordinates
-                - normals: (n_points, dim) array of outward normals
+            Кортеж (points, normals), где:
+                - points: массив координат границ формы (n_points, dim)
+                - normals: массив внешних нормалей формы (n_points, dim)
         """
         if rng is None:
             rng = jax.random.PRNGKey(0)
@@ -1437,15 +1437,15 @@ class MeshGeometry(GeometryBase):
 
     def get_normal_at_point(self, point: jnp.ndarray) -> jnp.ndarray:
         """
-        Compute normal at a given point on the boundary.
+        Вычисляет нормаль в заданной точке на границе.
 
-        Uses interpolation of face normals based on closest faces.
+        Использует интерполяцию граневых нормалей на основе ближайших граней.
 
         Args:
-            point: Point coordinates (dim,)
+            point: Координаты точки (dim,)
 
         Returns:
-            Unit normal vector (dim,)
+            Единичный вектор нормали (dim,)
         """
         if self.normals is None:
             raise ValueError("Normals not computed for this geometry")

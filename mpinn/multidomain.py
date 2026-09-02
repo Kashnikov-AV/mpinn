@@ -1,17 +1,17 @@
 """
-Multi-Domain PINN (MPINN) implementation.
+Реализация мультидоменной ФИНС (MPINN).
 
-MPINN coordinates multiple independent PINN instances, each trained on its own domain,
-while enforcing continuity conditions at domain interfaces.
+MPINN координирует несколько независимых экземпляров PINN, каждый из которых обучается на своей области,
+одновременно обеспечивая условия непрерывности на границах раздела доменов.
 
-Each domain has its own:
-- Geometry (Interval for 1D)
-- PDE function
-- BC configs (only for EXTERNAL boundaries, NOT interfaces)
-- Collocation points
-- Weights for PDE and BC losses
+Каждый домен имеет свои:
+- Геометрию (Interval для 1D)
+- Функцию УЧП
+- Конфигурации ГУ (только для ВНЕШНИХ границ, НЕ для интерфейсов)
+- Коллокационные точки
+- Веса для потерь УЧП и ГУ
 
-Interface conditions are handled separately via interface_loss.
+Условия на интерфейсах обрабатываются отдельно через interface_loss.
 """
 
 import time
@@ -34,19 +34,19 @@ def compute_interface_loss(
     models: tuple[Any], interfaces: tuple[float], all_lambdas: tuple[float]
 ) -> list[float]:
     """
-    Compute interface losses between adjacent domains.
+    Вычисление потерь на интерфейсах между соседними доменами.
 
-    Enforces continuity of solution and flux at domain interfaces:
-    - Continuity of T: (T0 - T1)^2
-    - Continuity of flux: (lambda_left * dT/dx|left - lambda_right * dT/dx|right)^2
+    Обеспечивает непрерывность решения и потока на границах раздела доменов:
+    - Непрерывность T: (T0 - T1)^2
+    - Непрерывность потока: (lambda_left * dT/dx|left - lambda_right * dT/dx|right)^2
 
     Args:
-        models: Tuple of neural network models for each domain
-        interfaces: Tuple of interface x-coordinates
-        all_lambdas: Tuple of lambda (conductivity) values for each domain
+        models: Кортеж нейросетевых моделей для каждого домена
+        interfaces: Кортеж x-координат интерфейсов
+        all_lambdas: Кортеж значений лямбда (теплопроводности) для каждого домена
 
     Returns:
-        List of interface loss values (one per interface)
+        Список значений потерь на интерфейсах (по одному на каждый интерфейс)
     """
     interface_losses = []
 
@@ -77,17 +77,17 @@ def compute_interface_loss(
 
 class MPINN:
     """
-    Multi-Domain Physics-Informed Neural Network.
+    Мультидоменная физически информированная нейронная сеть (ФИНС).
 
-    Coordinates training of multiple PINN instances across different spatial domains,
-    enforcing boundary conditions on external boundaries only and interface continuity constraints.
+    Координирует обучение нескольких экземпляров PINN на различных пространственных доменах,
+    обеспечивая граничные условия только на внешних границах и ограничения непрерывности на интерфейсах.
 
     Attributes:
-        boundaries: Tuple of domain boundary coordinates (including interfaces)
-        n_domains: Number of subdomains
-        interfaces: Tuple of interface x-coordinates
-        pinn_instances: List of PINN objects, one per domain
-        domain_configs: List of configuration dicts for each domain
+        boundaries: Кортеж координат границ доменов (включая интерфейсы)
+        n_domains: Количество подобластей
+        interfaces: Кортеж x-координат интерфейсов
+        pinn_instances: Список объектов PINN, по одному на каждый домен
+        domain_configs: Список конфигурационных словарей для каждого домена
     """
 
     def __init__(
@@ -99,22 +99,22 @@ class MPINN:
         rng: jax.Array | None = None,
     ):
         """
-        Initialize MPINN with multiple neural networks for multi-domain problems.
+        Инициализация MPINN с несколькими нейронными сетями для многодоменных задач.
 
-        Each domain_config should contain:
-        - 'geom': Interval geometry for the domain
-        - 'pde': PDE residual function for this domain
-        - 'bc_configs': List of BC configs for EXTERNAL boundaries only
-        - 'n_points': Number of collocation points in interior
-        - 'weights': Tuple (pde_weight, bc_weight) for this domain
-        - 'net': Optional pre-created FCNet (if not provided, will use default arch)
+        Каждый domain_config должен содержать:
+        - 'geom': Геометрия Interval для домена
+        - 'pde': Функция остатка УЧП для этого домена
+        - 'bc_configs': Список конфигураций ГУ только для ВНЕШНИХ границ
+        - 'n_points': Количество коллокационных точек во внутренней области
+        - 'weights': Кортеж (pde_weight, bc_weight) для этого домена
+        - 'net': Опционально предварительно созданная FCNet (если не предоставлена, будет использована архитектура по умолчанию)
 
         Args:
-            domain_configs: List of dicts, one per domain with geometry, PDE, BC configs, weights
-            interfaces: Tuple of interface x-coordinates between domains
-            all_lambdas: Tuple of thermal conductivity values for each domain
-            interface_weight: Weight for interface continuity conditions
-            rng: JAX random key
+            domain_configs: Список словарей, по одному на каждый домен с геометрией, УЧП, конфигурациями ГУ, весами
+            interfaces: Кортеж x-координат интерфейсов между доменами
+            all_lambdas: Кортеж значений теплопроводности для каждого домена
+            interface_weight: Вес для условий непрерывности на интерфейсах
+            rng: Случайный ключ JAX
         """
         self.n_domains = len(domain_configs)
         self.interfaces = interfaces
@@ -154,18 +154,18 @@ class MPINN:
 
     def create_loss_fn(self, phys: Any | None = None):
         """
-        Create a composite loss function for multi-domain training.
+        Создание составной функции потерь для многодоменного обучения.
 
-        The total loss includes:
-        - PDE residuals in each domain (computed via PINN.create_loss_fn)
-        - BC losses on EXTERNAL boundaries only (via bc_configs in each domain)
-        - Interface continuity conditions (solution and flux)
+        Полные потери включают:
+        - Остатки УЧП в каждом домене (вычисляются через PINN.create_loss_fn)
+        - Потери ГУ на ВНЕШНИХ границах только (через bc_configs в каждом домене)
+        - Условия непрерывности на интерфейсах (решение и поток)
 
         Args:
-            phys: Optional PhysicsParams object (can be used for global params)
+            phys: Опциональный объект PhysicsParams (может использоваться для глобальных параметров)
 
         Returns:
-            A loss function with signature (params_tuple,) -> (total_loss, aux_losses)
+            Функция потерь с сигнатурой (params_tuple,) -> (total_loss, aux_losses)
         """
         def total_loss(params_tuple):
             # Reconstruct models from graphdefs and parameters
@@ -237,14 +237,14 @@ class MPINN:
         loss_fn: Callable,
     ):
         """
-        Perform a single training step for all domains.
+        Выполнение одного шага обучения для всех доменов.
 
         Args:
-            params: Tuple of parameters for each PINN
-            loss_fn: Loss function created by create_loss_fn (already has x_collocation bound)
+            params: Кортеж параметров для каждой PINN
+            loss_fn: Функция потерь, созданная через create_loss_fn (уже имеет привязку x_collocation)
 
         Returns:
-            Tuple of (new_params, new_opt_states, total_loss, aux_losses)
+            Кортеж из (new_params, new_opt_states, total_loss, aux_losses)
         """
         def closure(p):
             return loss_fn(p)
@@ -269,16 +269,16 @@ class MPINN:
         log_interval: int = 100,
     ):
         """
-        Training loop for MPINN.
+        Цикл обучения для MPINN.
 
         Args:
-            num_steps: Number of training steps
-            loss_fn: Loss function (already has x_collocation bound)
-            loss_names: Names of loss components for logging
-            log_interval: Frequency of logging
+            num_steps: Количество шагов обучения
+            loss_fn: Функция потерь (уже имеет привязку x_collocation)
+            loss_names: Имена компонентов потерь для логирования
+            log_interval: Частота логирования
 
         Returns:
-            Dictionary containing training history
+            Словарь, содержащий историю обучения
         """
         history = {"steps": [], "total_loss": []}
         for name in loss_names:
@@ -306,15 +306,15 @@ class MPINN:
         log_interval: int = 100,
     ):
         """
-        Train the MPINN model.
+        Обучение модели MPINN.
 
         Args:
-            phys: Optional PhysicsParams object passed to create_loss_fn
-            epochs: Number of training epochs
-            log_interval: Frequency of logging
+            phys: Опциональный объект PhysicsParams, передаваемый в create_loss_fn
+            epochs: Количество эпох обучения
+            log_interval: Частота логирования
 
         Returns:
-            Tuple of (history_dict, training_time)
+            Кортеж из (history_dict, training_time)
         """
         loss_fn = self.create_loss_fn(phys)
         loss_names = (
@@ -330,13 +330,13 @@ class MPINN:
 
     def predict(self, x_test):
         """
-        Predict temperature values for given x coordinates.
+        Предсказание значений температуры для заданных координат x.
 
         Args:
-            x_test: Input x coordinates (array-like)
+            x_test: Входные координаты x (массивоподобный объект)
 
         Returns:
-            Predicted temperature values
+            Предсказанные значения температуры
         """
         models = tuple(nnx.merge(g, p) for g, p in zip(self.graphdefs, self.params))
         x_flat = jnp.atleast_1d(x_test.ravel())
@@ -355,33 +355,33 @@ class MPINN:
 
     def compute_metrics(self, x_test, t_pred, t_exact):
         """
-        Compute error metrics between predicted and exact solutions.
+        Вычисление метрик ошибки между предсказанными и точными решениями.
 
-        Delegates to PINN.compute_metrics for consistency.
+        Делегирует PINN.compute_metrics для согласованности.
 
         Args:
-            x_test: Input x coordinates
-            t_pred: Predicted temperatures
-            t_exact: Exact temperatures
+            x_test: Входные координаты x
+            t_pred: Предсказанные температуры
+            t_exact: Точные температуры
 
         Returns:
-            Dictionary of error metrics (MAPE, MAE, MSE, RMSE, max_error)
+            Словарь метрик ошибки (MAPE, MAE, MSE, RMSE, max_error)
         """
         # Use the first PINN instance's compute_metrics for consistency
         return self.pinn_instances[0].compute_metrics(x_test, t_pred, t_exact)
 
     def evaluate(self, x_test, exact_fn, phys, bc_names=None):
         """
-        Evaluate the model against an exact solution.
+        Оценка модели относительно точного решения.
 
         Args:
-            x_test: Test x coordinates
-            exact_fn: Function computing exact solution
-            phys: PhysicsParams object
-            bc_names: Optional boundary condition names
+            x_test: Тестовые координаты x
+            exact_fn: Функция вычисления точного решения
+            phys: Объект PhysicsParams
+            bc_names: Опциональные имена граничных условий
 
         Returns:
-            Tuple of (metrics_dict, predicted_values, exact_values)
+            Кортеж из (metrics_dict, predicted_values, exact_values)
         """
         t_pred = self.predict(x_test)
         t_exact = exact_fn(x_test.ravel(), phys)
@@ -401,17 +401,17 @@ class MPINN:
         title="Сравнение MPINN и точного решения",
     ):
         """
-        Save a plot comparing predicted and exact solutions.
+        Сохранение графика сравнения предсказанного и точного решений.
 
-        Uses the unified plotting module with interface markers.
+        Использует унифицированный модуль построения графиков с маркерами интерфейсов.
 
         Args:
-            x_test: Test x coordinates
-            t_pred: Predicted temperatures
-            t_exact: Exact temperatures
-            phys: PhysicsParams object
-            save_path: Path to save the figure
-            title: Plot title
+            x_test: Тестовые координаты x
+            t_pred: Предсказанные температуры
+            t_exact: Точные температуры
+            phys: Объект PhysicsParams
+            save_path: Путь для сохранения фигуры
+            title: Заголовок графика
         """
         _fig, ax = plt.subplots(figsize=(8, 5))
         ax.plot(
@@ -435,16 +435,16 @@ class MPINN:
         self, x_test, t_pred, t_exact, phys, title="Сравнение MPINN и точного решения"
     ):
         """
-        Display a plot comparing predicted and exact solutions.
+        Отображение графика сравнения предсказанного и точного решений.
 
-        Uses the unified plotting module with interface markers.
+        Использует унифицированный модуль построения графиков с маркерами интерфейсов.
 
         Args:
-            x_test: Test x coordinates
-            t_pred: Predicted temperatures
-            t_exact: Exact temperatures
-            phys: PhysicsParams object
-            title: Plot title
+            x_test: Тестовые координаты x
+            t_pred: Предсказанные температуры
+            t_exact: Точные температуры
+            phys: Объект PhysicsParams
+            title: Заголовок графика
         """
         _fig, ax = plt.subplots(figsize=(8, 5))
         ax.plot(
