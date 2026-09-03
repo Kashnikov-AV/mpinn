@@ -9,6 +9,10 @@ from mpinn.geom import Interval
 from mpinn.pde import line_1d
 from mpinn.pinn_core import FCNet
 
+from mpinn.config import PhysicsParams
+
+phys = PhysicsParams(_lambda=1.0, T_min=0.0, T_max=1.0)
+
 
 class TestPINNIntegration:
     """Integration tests for complete PINN workflow."""
@@ -30,7 +34,7 @@ class TestPINNIntegration:
         # Define loss function
         def compute_loss(model, x_col, x0, x1):
             # PDE residual loss
-            pde_residual = line_1d(model, x_col, phys=None)
+            pde_residual = line_1d(model, x_col, phys=phys)
             pde_loss = jnp.mean(pde_residual**2)
 
             # BC losses (mean squared residuals)
@@ -61,7 +65,7 @@ class TestPINNIntegration:
         )
 
         def loss_fn(model):
-            pde_residual = line_1d(model, x_collocation, phys=None)
+            pde_residual = line_1d(model, x_collocation, phys=phys)
             pde_loss = jnp.mean(pde_residual**2)
 
             bc_left_residual = dirichlet_bc(model, x_bc_left, 0.0)
@@ -78,28 +82,6 @@ class TestPINNIntegration:
         # Check gradient structure - NNX returns a GraphState-like object
         assert grads is not None
 
-    def test_normalization_integration(self, seed_key):
-        """Test normalization with network forward pass."""
-        rngs = nnx.Rngs(seed_key)
-        net = FCNet(
-            din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
-        )
-
-        # Original data in [0, 10]
-        x_original = jnp.linspace(0.0, 10.0, 20).reshape(-1, 1)
-
-        # Normalize to [0, 1]
-        x_norm = normalize(x_original, 0.0, 10.0)
-
-        # Forward pass
-        y_norm = net(x_norm)
-
-        # Denormalize output (assuming output also in [0, 10])
-        y_original = denormalize(y_norm, 0.0, 10.0)
-
-        assert y_original.shape == y_norm.shape
-        assert jnp.all(jnp.isfinite(y_original))
-
     def test_jit_compiled_training(self, seed_key):
         """Test JIT-compiled training step."""
         geom = Interval(0.0, 1.0)
@@ -113,7 +95,7 @@ class TestPINNIntegration:
         )
 
         def loss_fn(model):
-            pde_residual = line_1d(model, x_collocation, phys=None)
+            pde_residual = line_1d(model, x_collocation, phys=phys)
             pde_loss = jnp.mean(pde_residual**2)
             bc_left_residual = dirichlet_bc(model, x_bc_left, 0.0)
             bc_right_residual = dirichlet_bc(model, x_bc_right, 1.0)

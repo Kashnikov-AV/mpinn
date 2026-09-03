@@ -4,7 +4,9 @@ import jax.numpy as jnp
 from flax import nnx
 
 from mpinn.pde import cylinder_1d, line_1d, sphere_1d
+from mpinn.config import PhysicsParams
 
+phys = PhysicsParams(_lambda=1.0, T_min=0.0, T_max=1.0)
 
 class TestLine1D:
     """Test cases for 1D line (Cartesian) PDE."""
@@ -21,7 +23,7 @@ class TestLine1D:
         )
 
         # phys is not used for line_1d, pass None or dummy object
-        residual = line_1d(net, x, phys=None)
+        residual = line_1d(net, x, phys=phys)
 
         # Residual should be a scalar (due to jnp.mean)
         assert residual.ndim == 0, f"Expected scalar, got shape {residual.shape}"
@@ -37,7 +39,7 @@ class TestLine1D:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        residual = line_1d(net, x, phys=None)
+        residual = line_1d(net, x, phys=phys)
 
         assert residual.dtype == jnp.float32, f"Expected float32, got {residual.dtype}"
 
@@ -52,8 +54,8 @@ class TestLine1D:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        res1 = line_1d(net, x, phys=None)
-        res2 = line_1d(net, x, phys=None)
+        res1 = line_1d(net, x, phys=phys)
+        res2 = line_1d(net, x, phys=phys)
 
         assert jnp.allclose(res1, res2), "PDE residual should be deterministic"
 
@@ -71,7 +73,7 @@ class TestLine1D:
         )
 
         # The residual should be finite and computable
-        residual = line_1d(net, x, phys=None)
+        residual = line_1d(net, x, phys=phys)
 
         # Just check it's a valid number
         assert jnp.isfinite(residual), f"Expected finite residual, got {residual}"
@@ -91,7 +93,7 @@ class TestCylinder1D:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        residual = cylinder_1d(net, x, phys=None)
+        residual = cylinder_1d(net, x, phys=phys)
 
         assert residual.ndim == 0, f"Expected scalar, got shape {residual.shape}"
 
@@ -106,7 +108,7 @@ class TestCylinder1D:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        residual = cylinder_1d(net, x, phys=None)
+        residual = cylinder_1d(net, x, phys=phys)
 
         assert residual.dtype == jnp.float32
 
@@ -125,7 +127,7 @@ class TestSphere1D:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        residual = sphere_1d(net, x, phys=None)
+        residual = sphere_1d(net, x, phys=phys)
 
         assert residual.ndim == 0, f"Expected scalar, got shape {residual.shape}"
 
@@ -140,7 +142,7 @@ class TestSphere1D:
             din=1, dmid=10, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
         )
 
-        residual = sphere_1d(net, x, phys=None)
+        residual = sphere_1d(net, x, phys=phys)
 
         assert residual.dtype == jnp.float32
 
@@ -160,16 +162,16 @@ class TestPDEDeterminism:
         )
 
         # Test line_1d
-        res1_line = line_1d(net, x, phys=None)
-        res2_line = line_1d(net, x, phys=None)
+        res1_line = line_1d(net, x, phys=phys)
+        res2_line = line_1d(net, x, phys=phys)
         assert jnp.allclose(res1_line, res2_line)
 
         # Test cylinder_1d
-        res1_cyl = cylinder_1d(net, x, phys=None)
-        res2_cyl = cylinder_1d(net, x, phys=None)
+        res1_cyl = cylinder_1d(net, x, phys=phys)
+        res2_cyl = cylinder_1d(net, x, phys=phys)
         assert jnp.allclose(res1_cyl, res2_cyl)
 
         # Test sphere_1d
-        res1_sph = sphere_1d(net, x, phys=None)
-        res2_sph = sphere_1d(net, x, phys=None)
+        res1_sph = sphere_1d(net, x, phys=phys)
+        res2_sph = sphere_1d(net, x, phys=phys)
         assert jnp.allclose(res1_sph, res2_sph)
