@@ -6,9 +6,8 @@
 from __future__ import annotations
 
 import time
-
+import jax
 import jax.numpy as jnp
-import optax
 from flax import nnx
 
 
@@ -42,11 +41,7 @@ class FCNet(nnx.Module):
 
 
 class NormalizedNet(nnx.Module):
-    """
-    Обёртка, нормализующая вход и денормализующая выход.
-    Позволяет сети работать с координатами и температурой в диапазоне [0,1],
-    сохраняя физический смысл через аффинное преобразование.
-    """
+    """Обёртка для нормализации входа и выхода."""
 
     def __init__(self, base_net, x_min, x_max, T_min, T_max):
         self.base_net = base_net
@@ -63,47 +58,21 @@ class NormalizedNet(nnx.Module):
 
 
 class PINN:
-    """
-    Физически-информированная нейронная сеть.
+    """Физически-информированная нейронная сеть."""
 
-    Attributes:
-        optimizer (nnx.Optimizer): оптимизатор Flax NNX.
-        weights (tuple): веса потерь (pde_weight, bc_weight).
-        net (nnx.Module): нейросеть.
-        phys (PhysicsParams): объёмные физические параметры (теплопроводность, источник и др.).
-    """
-
-    def __init__(self, net, opt, weights, phys=None):
-        """
-        Инициализация PINN.
-
-        Args:
-            net: нейросеть, поддерживающая вызов __call__(x).
-            opt: оптимизатор optax.
-            weights: кортеж (pde_weight, bc_weight).
-            phys: объект PhysicsParams (объёмные параметры).
-        """
-        self.optimizer = nnx.Optimizer(net, opt, wrt=nnx.Param)
-        self.weights = weights
+    def __init__(self, net, opt, weights, phys, pde_fn, bc_configs):
+        # Модель хранится отдельно, оптимизатор – только состояние
         self.net = net
+        self.optimizer = nnx.ModelAndOptimizer(self.net, opt, wrt=nnx.Param)
+        self.weights = weights
         self.phys = phys
+        self.pde_fn = pde_fn
+        self.bc_configs = bc_configs
 
-    def create_loss_fn(self, pde_fn, bc_configs):
-        """
-        Создаёт функцию потерь для обучения PINN.
-
-        Args:
-            pde_fn: функция невязки PDE, принимает (model, x, phys).
-            bc_configs: список конфигураций ГУ. Каждый элемент содержит:
-                - 'fn': функция невязки (dirichlet_bc, neumann_bc, robin_bc)
-                - 'points': точки на границе (N, D)
-                - 'normals': нормали (N, D), если требуется
-                - 'params': словарь с явными числовыми параметрами
-
-        Returns:
-            callable: функция total_loss(model, x_collocation) -> (total, aux).
-        """
+    def create_loss_fn(self):
         phys = self.phys
+        pde_fn = self.pde_fn
+        bc_configs = self.bc_configs
 
         def total_loss(model, x_collocation):
             loss_pde = pde_fn(model, x_collocation, phys)
@@ -128,86 +97,49 @@ class PINN:
 
         return total_loss
 
-    @nnx.jit
-    def train_step(self, x_collocation, pde_fn, bc_configs):
-        """
-        Один шаг оптимизации.
-
-        Args:
-            x_collocation: точки коллокации (N, D).
-            pde_fn: функция PDE.
-            bc_configs: конфигурации ГУ.
-
-        Returns:
-            dict: потери (total_loss, pde, bc_*).
-        """
-        loss_fn = self.create_loss_fn(pde_fn, bc_configs)
+    @nnx.jit(static_argnums=(0,))
+    def train_step(self, optimizer, x_collocation):
+        loss_fn = self.create_loss_fn()
 
         def loss_and_aux(model):
             return loss_fn(model, x_collocation)
 
-        (total, aux), grads = nnx.value_and_grad(loss_and_aux, has_aux=True)(self.optimizer.model)
-        self.optimizer.update(grads)
+        (total, aux), grads = nnx.value_and_grad(loss_and_aux, has_aux=True)(optimizer.model)
+        optimizer.update(grads)
 
-        losses = {"total_loss": float(total)}
-        losses["pde"] = float(aux[0])
-        losses["bc_total"] = float(sum(aux[1:])) if len(aux) > 1 else 0.0
+        losses = {"total_loss": total}
+        losses["pde"] = aux[0]
+        losses["bc_total"] = jnp.sum(jnp.array(aux[1:])) if len(aux) > 1 else 0.0
         for i, val in enumerate(aux[1:], start=1):
-            losses[f"bc_{i-1}"] = float(val)
+            losses[f"bc_{i-1}"] = val
         return losses
 
-    def train_loop(self, x_collocation, pde_fn, bc_configs, num_steps, log_interval=100):
-        """
-        Цикл обучения без ранней остановки.
-
-        Args:
-            x_collocation: точки коллокации.
-            pde_fn: функция PDE.
-            bc_configs: конфигурации ГУ.
-            num_steps: количество шагов.
-            log_interval: частота логирования.
-
-        Returns:
-            dict: история потерь.
-        """
-        n_bc = len(bc_configs)
+    def train_loop(self, x_collocation, num_steps, log_interval=100):
+        n_bc = len(self.bc_configs)
         loss_names = ["pde", "bc_total"] + [f"bc_{i}" for i in range(n_bc)]
         history = {"steps": [], "total_loss": []}
         for name in loss_names:
             history[name] = []
 
         for step in range(num_steps):
-            losses = self.train_step(x_collocation, pde_fn, bc_configs)
+            losses = self.train_step(self.optimizer, x_collocation)
             if step % log_interval == 0 or step == num_steps - 1:
                 history["steps"].append(step)
-                history["total_loss"].append(losses["total_loss"])
+                history["total_loss"].append(float(losses["total_loss"]))
                 for name in loss_names:
                     history[name].append(losses.get(name, losses["total_loss"]))
         return history
 
-    def fit(self, x_collocation, pde_fn, bc_configs, epochs, log_interval=100):
-        """
-        Запуск обучения.
-
-        Returns:
-            tuple: (history, training_time_seconds)
-        """
+    def fit(self, x_collocation, epochs, log_interval=100):
         start_time = time.perf_counter()
-        history = self.train_loop(x_collocation, pde_fn, bc_configs, epochs, log_interval)
+        history = self.train_loop(x_collocation, epochs, log_interval)
         end_time = time.perf_counter()
         return history, end_time - start_time
 
     def predict(self, x_test):
-        """Возвращает предсказания температуры в точках x_test."""
-        return self.optimizer.model(x_test)
+        return self.net(x_test)
 
     def compute_metrics(self, x_test, T_pred, T_exact):
-        """
-        Вычисляет метрики ошибки между предсказанием и точным решением.
-
-        Returns:
-            dict: {'mape', 'mae', 'mse', 'rmse', 'max_error'}
-        """
         diff = T_pred - T_exact
         mse = float(jnp.mean(diff**2))
         mae = float(jnp.mean(jnp.abs(diff)))
@@ -223,20 +155,6 @@ class PINN:
         }
 
     def evaluate(self, x_test, exact_fn, phys, bc_info=None):
-        """
-        Оценивает модель на точном решении.
-
-        Args:
-            x_test: тестовые точки.
-            exact_fn: функция точного решения, принимает (x, phys).
-            phys: физические параметры для точного решения.
-            bc_info: словарь {имя_грани: тип_ГУ} (опционально).
-                     Например: {'left': 'dirichlet', 'right': 'robin'}.
-                     Может содержать произвольное число ключей для 1D, 2D, 3D.
-
-        Returns:
-            tuple: (metrics_dict, T_pred, T_exact)
-        """
         T_pred = self.predict(x_test).ravel()
         T_exact = exact_fn(x_test.ravel(), phys)
         metrics = self.compute_metrics(x_test, T_pred, T_exact)

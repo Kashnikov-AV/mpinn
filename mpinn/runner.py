@@ -5,7 +5,7 @@
 
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -26,8 +26,27 @@ def run_experiment(
     bc_configs: List[Dict[str, Any]],
     bc_info: Optional[Dict[str, str]] = None,
     x_test: Optional[jnp.ndarray] = None,
-) -> Tuple[Dict[str, Any], Dict[str, List[float]]]:
-    """Запускает один эксперимент PINN с нормализацией."""
+    return_model: bool = False,
+) -> Union[Tuple[Dict[str, Any], Dict[str, List[float]]],
+           Tuple[Dict[str, Any], Dict[str, List[float]], PINN]]:
+    """
+    Запускает один эксперимент PINN с нормализацией.
+
+    Args:
+        config: конфигурация обучения.
+        geom: геометрия.
+        phys: физические параметры.
+        pde_fn: функция PDE.
+        exact_fn: функция точного решения (может быть None).
+        bc_configs: список конфигураций ГУ.
+        bc_info: информация о ГУ для логирования.
+        x_test: тестовые точки (если None – генерируются).
+        return_model: если True, возвращает также обученную модель PINN.
+
+    Returns:
+        Если return_model=False: (result, history)
+        Если return_model=True: (result, history, pinn)
+    """
     x_collocation = geom.sample_interior(
         n_points=config.num_points,
         method="random",
@@ -59,14 +78,19 @@ def run_experiment(
     net = NormalizedNet(base_net, x_min, x_max, phys.T_min, phys.T_max)
 
     optimizer = get_optimizer(config.opt_name, lr=config.lr)
-    pinn = PINN(net, opt=optimizer, weights=list(config.weights), phys=phys)
+    pinn = PINN(
+        net=net,
+        opt=optimizer,
+        weights=list(config.weights),
+        phys=phys,
+        pde_fn=pde_fn,
+        bc_configs=bc_configs
+    )
 
     history, training_time = pinn.fit(
         x_collocation=x_collocation,
-        pde_fn=pde_fn,
-        bc_configs=bc_configs,
-        epochs=config.max_epochs,
-        log_interval=config.log_interval,
+        epochs=config.epochs,
+        log_interval=config.log_interval
     )
 
     if x_test is None:
@@ -78,7 +102,7 @@ def run_experiment(
 
     result = {
         "training_time": f"{training_time:.4f}",
-        "epochs_trained": len(history["steps"]),
+        "epochs_trained": config.epochs,
         "lr": config.lr,
         "activation_func": config.activation_name,
         "layers": config.num_layers,
@@ -99,6 +123,8 @@ def run_experiment(
         for name, bc_type in bc_info.items():
             result[f"bc_{name}"] = bc_type
 
+    if return_model:
+        return result, history, pinn
     return result, history
 
 
@@ -168,8 +194,6 @@ def run_grid_search(
             "num_points": base_config.num_points,
             "weights": base_config.weights,
             "log_interval": base_config.log_interval,
-            "save_img": False,
-            "show_plot": False,
         }
         for key, value in zip(keys, combo):
             if key in config_dict:
@@ -185,6 +209,7 @@ def run_grid_search(
                 exact_fn=exact_fn,
                 bc_configs=bc_configs,
                 bc_info=bc_info,
+                return_model=False,
             )
             results.append(result)
         except Exception as e:

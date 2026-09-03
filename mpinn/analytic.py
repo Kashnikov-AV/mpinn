@@ -1,101 +1,111 @@
+"""
+Точные аналитические решения для 1D задач теплопроводности.
+Каждая функция возвращает вызываемый объект exact(x, phys),
+где phys используется для получения _lambda (если нужно).
+Параметры задаются явно при создании фабрики.
+"""
+
 import jax.numpy as jnp
 
 
-def line_1d_dirichlet_exact(x, phys):
-    x0, x1 = phys.x0, phys.x1
-    T0, T1 = phys.T0, phys.T1
-    return T0 + (T1 - T0) * (x - x0) / (x1 - x0)
+def line_1d_dirichlet_exact(T0: float, T1: float, x0: float, x1: float):
+    """T(x) = T0 + (T1 - T0) * (x - x0) / (x1 - x0)"""
+    def exact(x, phys):
+        return T0 + (T1 - T0) * (x - x0) / (x1 - x0)
+    return exact
 
 
-def line_1d_neuman_exact(x, phys):
-    return phys.T0 + phys.grad_right * (x - phys.x0)
+def line_1d_neuman_exact(T0: float, flux: float, x0: float, x1: float):
+    """
+    Условие Неймана на правой границе: -λ * dT/dx = flux.
+    Решение: T(x) = T0 + grad * (x - x0), где grad = -flux / λ.
+    """
+    def exact(x, phys):
+        lam = phys._lambda
+        grad = -flux / lam
+        return T0 + grad * (x - x0)
+    return exact
 
 
-def line_1d_robin_exact(x, phys):
-    x0 = phys.x0
-    x1 = phys.x1
-
-    h = phys.h
-    _lambda = phys._lambda
-    T_inf = phys.T_inf
-    T0 = phys.T0
-
-    # Условие Робина: h·T + λ·dT/dx = h·T_inf
-    # Общее решение: T(x) = A·x + B
-    # Из левой границы: B = T0 - A·x0
-    # Подстановка в правую границу даёт:
-    denominator = h * (x1 - x0) + _lambda
-    A = h * (T_inf - T0) / denominator
-    B = T0 - A * x0
-
-    return A * x + B
+def line_1d_robin_exact(T0: float, T_inf: float, h: float, x0: float, x1: float):
+    """
+    Условие Робина на правой границе: h*(T - T_inf) + λ*dT/dx = 0.
+    Решение: T(x) = T0 + A*(x - x0), A = h*(T_inf - T0) / (h*(x1 - x0) + λ)
+    """
+    def exact(x, phys):
+        lam = phys._lambda
+        denominator = h * (x1 - x0) + lam
+        A = h * (T_inf - T0) / denominator
+        return T0 + A * (x - x0)
+    return exact
 
 
-def cylinder_1d_dirichlet_exact(x, phys):
-    r0, r1 = phys.x0, phys.x1
-    T0, T1 = phys.T0, phys.T1
-    ln_r0 = jnp.log(r0)
-    ln_r1 = jnp.log(r1)
-    return T0 + (T1 - T0) * (jnp.log(x) - ln_r0) / (ln_r1 - ln_r0)
+def cylinder_1d_dirichlet_exact(T0: float, T1: float, r0: float, r1: float):
+    """T(r) = T0 + (T1 - T0) * ln(r/r0) / ln(r1/r0)"""
+    def exact(x, phys):
+        return T0 + (T1 - T0) * jnp.log(x / r0) / jnp.log(r1 / r0)
+    return exact
 
 
-def cylinder_1d_neuman_exact(x, phys):
-    r0, r1 = phys.x0, phys.x1
-    # Константа интегрирования: для цилиндра dT/dr = C/r
-    # Из условия Неймана: C = grad_right * r1
-    C = phys.grad_right * r1
-    return phys.T0 + C * (jnp.log(x) - jnp.log(r0))
+def cylinder_1d_neuman_exact(T0: float, flux: float, r0: float, r1: float):
+    """
+    Условие Неймана на правой границе: -λ * dT/dr = flux.
+    Решение: T(r) = T0 + grad * r1 * ln(r/r0), где grad = -flux / λ.
+    """
+    def exact(x, phys):
+        lam = phys._lambda
+        grad = -flux / lam
+        C = grad * r1
+        return T0 + C * jnp.log(x / r0)
+    return exact
 
 
-def cylinder_1d_robin_exact(x, phys):
-    r0 = phys.x0
-    r1 = phys.x1
-
-    h = phys.h
-    _lambda = phys._lambda
-    T0 = phys.T0
-    T_inf = phys.T_inf
-
-    # Константа интегрирования, найденная из условия конвекции на r = r1
-    denominator = _lambda + h * r1 * jnp.log(r1 / r0)
-    C1 = h * r1 * (T_inf - T0) / denominator
-
-    # Общее решение: T(r) = T0 + C1 * ln(r/r0)
-    return T0 + C1 * jnp.log(x / r0)
+def cylinder_1d_robin_exact(T0: float, T_inf: float, h: float, r0: float, r1: float):
+    """
+    Условие Робина на правой границе: h*(T - T_inf) + λ*dT/dr = 0.
+    Решение: T(r) = T0 + C1 * ln(r/r0),
+              C1 = h*r1*(T_inf - T0) / (λ + h*r1*ln(r1/r0))
+    """
+    def exact(x, phys):
+        lam = phys._lambda
+        denominator = lam + h * r1 * jnp.log(r1 / r0)
+        C1 = h * r1 * (T_inf - T0) / denominator
+        return T0 + C1 * jnp.log(x / r0)
+    return exact
 
 
-def sphere_1d_dirichlet_exact(x, phys):
-    r0, r1 = phys.x0, phys.x1
-    T0, T1 = phys.T0, phys.T1
-    inv_r0 = 1.0 / r0
-    inv_r1 = 1.0 / r1
-    inv_x = 1.0 / x
-    return T0 + (T1 - T0) * (inv_r0 - inv_x) / (inv_r0 - inv_r1)
+def sphere_1d_dirichlet_exact(T0: float, T1: float, r0: float, r1: float):
+    """T(r) = T0 + (T1 - T0) * (1/r0 - 1/r) / (1/r0 - 1/r1)"""
+    def exact(x, phys):
+        inv_r0 = 1.0 / r0
+        inv_r1 = 1.0 / r1
+        inv_x = 1.0 / x
+        return T0 + (T1 - T0) * (inv_r0 - inv_x) / (inv_r0 - inv_r1)
+    return exact
 
 
-def sphere_1d_neuman_exact(x, phys):
-    r0 = phys.x0
-    r1 = phys.x1
-    return phys.T0 - phys.grad_right * r1**2 * (1.0 / x - 1.0 / r0)
+def sphere_1d_neuman_exact(T0: float, flux: float, r0: float, r1: float):
+    """
+    Условие Неймана на правой границе: -λ * dT/dr = flux.
+    Решение: T(r) = T0 - grad * r1^2 * (1/r - 1/r0),
+              где grad = -flux / λ.
+    """
+    def exact(x, phys):
+        lam = phys._lambda
+        grad = -flux / lam
+        return T0 - grad * r1**2 * (1.0 / x - 1.0 / r0)
+    return exact
 
 
-def sphere_1d_robin_exact(x, phys):
-    r0 = phys.x0
-    r1 = phys.x1
-
-    h = phys.h
-    _lambda = phys._lambda
-    T0 = phys.T0
-    T_inf = phys.T_inf
-
-    # Общая форма решения для сферы: T(r) = T0 + C1 * (1/r0 - 1/r)
-    # Производная: dT/dr = C1 / r^2
-
-    # Условие Робина на r1: -_lambda * dT/dr = h * (T - T_inf)
-    # -_lambda * (C1 / r1^2) = h * (T0 + C1*(1/r0 - 1/r1) - T_inf)
-    # C1 * [_lambda/r1^2 + h*(1/r0 - 1/r1)] = h * (T_inf - T0)
-
-    denominator = (_lambda / r1**2) + h * (1.0 / r0 - 1.0 / r1)
-    C1 = h * (T_inf - T0) / denominator
-
-    return T0 + C1 * (1.0 / r0 - 1.0 / x)
+def sphere_1d_robin_exact(T0: float, T_inf: float, h: float, r0: float, r1: float):
+    """
+    Условие Робина на правой границе: h*(T - T_inf) + λ*dT/dr = 0.
+    Решение: T(r) = T0 + C1 * (1/r0 - 1/r),
+              C1 = h*(T_inf - T0) / (λ/r1^2 + h*(1/r0 - 1/r1))
+    """
+    def exact(x, phys):
+        lam = phys._lambda
+        denominator = (lam / r1**2) + h * (1.0 / r0 - 1.0 / r1)
+        C1 = h * (T_inf - T0) / denominator
+        return T0 + C1 * (1.0 / r0 - 1.0 / x)
+    return exact

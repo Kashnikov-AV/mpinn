@@ -24,7 +24,6 @@ def show_plot(
     x_test: Union[np.ndarray, "jnp.ndarray"],
     T_pred: Union[np.ndarray, "jnp.ndarray"],
     T_exact: Union[np.ndarray, "jnp.ndarray"],
-    phys=None,
     title: str = "Сравнение PINN и точного решения"
 ) -> None:
     """Отображает 1D график сравнения."""
@@ -45,7 +44,6 @@ def save_plot(
     x_test: Union[np.ndarray, "jnp.ndarray"],
     T_pred: Union[np.ndarray, "jnp.ndarray"],
     T_exact: Union[np.ndarray, "jnp.ndarray"],
-    phys=None,
     save_path: str = "",
     title: str = "Сравнение PINN и точного решения"
 ) -> None:

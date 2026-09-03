@@ -1,51 +1,10 @@
-"""Tests for PINN core module (FCNet, normalize, denormalize)."""
+"""Tests for PINN core module (FCNet)."""
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
-from mpinn.pinn_core import FCNet, denormalize, normalize
-
-
-class TestNormalize:
-    """Test data normalization functions."""
-
-    def test_normalize_output_shape(self):
-        """Check that normalize preserves shape."""
-        x = jnp.linspace(0.0, 10.0, 20).reshape(-1, 1)
-        x_min, x_max = 0.0, 10.0
-
-        x_norm = normalize(x, x_min, x_max)
-
-        assert x_norm.shape == x.shape
-
-    def test_normalize_range(self):
-        """Check that normalized data is in [0, 1]."""
-        x = jnp.array([[0.0], [5.0], [10.0]], dtype=jnp.float32)
-        x_min, x_max = 0.0, 10.0
-
-        x_norm = normalize(x, x_min, x_max)
-
-        assert jnp.all(x_norm >= 0.0 - 1e-6)
-        assert jnp.all(x_norm <= 1.0 + 1e-6)
-
-    def test_normalize_dtype(self):
-        """Check dtype preservation."""
-        x = jnp.array([[1.0], [2.0]], dtype=jnp.float32)
-
-        x_norm = normalize(x, 0.0, 10.0)
-
-        assert x_norm.dtype == jnp.float32
-
-    def test_denormalize_inverse(self):
-        """Check that denormalize is inverse of normalize."""
-        x = jnp.array([[2.5], [5.0], [7.5]], dtype=jnp.float32)
-        x_min, x_max = 0.0, 10.0
-
-        x_norm = normalize(x, x_min, x_max)
-        x_denorm = denormalize(x_norm, x_min, x_max)
-
-        assert jnp.allclose(x, x_denorm, atol=1e-6)
+from mpinn.pinn_core import FCNet
 
 
 class TestFCNet:
