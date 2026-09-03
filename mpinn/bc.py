@@ -26,6 +26,11 @@ def dirichlet_bc(model, points, values):
         Массив невязок формы (n_points,).
     """
     T_pred = model(points).ravel()
+    # Приводим values к той же форме, что и T_pred
+    if jnp.ndim(values) == 0:
+        values = jnp.full_like(T_pred, values)
+    else:
+        values = jnp.ravel(values)
     return T_pred - values
 
 
@@ -57,7 +62,14 @@ def neumann_bc(model, points, normals, flux_values):
         return jax.grad(predict)(x)
 
     grads = jax.vmap(grad_predict)(points)
-    normal_deriv = jnp.sum(grads * normals, axis=1)
+    normal_deriv = jnp.sum(grads * normals, axis=1)  # (n_points,)
+    
+    # Приводим flux_values к той же форме
+    if jnp.ndim(flux_values) == 0:
+        flux_values = jnp.full_like(normal_deriv, flux_values)
+    else:
+        flux_values = jnp.ravel(flux_values)
+    
     return normal_deriv - flux_values
 
 
@@ -78,7 +90,7 @@ def robin_bc(model, points, normals, alpha, beta, value):
         Коэффициент при температуре.
     beta : float
         Коэффициент при градиенте температуры.
-    value : float
+    value : float | jax.Array
         Заданное значение комбинации.
 
     Returns
@@ -94,5 +106,12 @@ def robin_bc(model, points, normals, alpha, beta, value):
 
     grads = jax.vmap(grad_predict)(points)
     T_vals = jax.vmap(predict)(points)
-    normal_deriv = jnp.sum(grads * normals, axis=1)
+    normal_deriv = jnp.sum(grads * normals, axis=1)  # (n_points,)
+
+    # Приводим value к той же форме
+    if jnp.ndim(value) == 0:
+        value = jnp.full_like(T_vals, value)
+    else:
+        value = jnp.ravel(value)
+
     return alpha * T_vals + beta * normal_deriv - value

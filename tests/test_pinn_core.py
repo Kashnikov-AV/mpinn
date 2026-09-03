@@ -1,10 +1,10 @@
-"""Tests for PINN core module (FCNet)."""
+"""Tests for PINN core module (FCNet and NormalizedNet)."""
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
-from mpinn.pinn_core import FCNet
+from mpinn.pinn_core import FCNet, NormalizedNet
 
 
 class TestFCNet:
@@ -102,4 +102,90 @@ class TestFCNetGradients:
         grads = grad_fn(net, x)
 
         # Check that gradients exist and have correct structure
+        assert grads is not None
+
+
+class TestNormalizedNet:
+    """Test NormalizedNet wrapper."""
+
+    def test_normalized_net_output_range(self, seed_key):
+        """Check that output values are within [T_min, T_max]."""
+        rngs = nnx.Rngs(seed_key)
+        base_net = FCNet(
+            din=1, dmid=16, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
+        )
+
+        x_min, x_max = 0.0, 2.0
+        T_min, T_max = 300.0, 500.0
+        net = NormalizedNet(base_net, x_min, x_max, T_min, T_max)
+
+        # Generate random x in [x_min, x_max]
+        x = jax.random.uniform(jax.random.PRNGKey(0), (100, 1), minval=x_min, maxval=x_max)
+        y = net(x)
+
+        assert jnp.all(y >= T_min) and jnp.all(y <= T_max), (
+            f"Output should be within [{T_min}, {T_max}], got min={y.min()}, max={y.max()}"
+        )
+
+    def test_normalized_net_inverse(self, seed_key):
+        """Check that normalization + denormalization is invertible."""
+        rngs = nnx.Rngs(seed_key)
+        base_net = FCNet(
+            din=1, dmid=8, dout=1, num_layers=1, activation=nnx.identity, rngs=rngs
+        )
+        # For identity base network, output should be exactly the normalized x mapped to T
+        x_min, x_max = 0.0, 1.0
+        T_min, T_max = 200.0, 600.0
+
+        # We need to force base_net to produce exact normalized output.
+        # However, the base net is not identity; we can instead just check the transformation logic.
+        # Better: create a dummy net that returns the input as is.
+        # We can override by creating a custom module, but easier: just test the formulas.
+
+        # We'll create a deterministic net that returns normalized x.
+        class IdentityNet(nnx.Module):
+            def __call__(self, x):
+                return x
+
+        base_net = IdentityNet()
+        net = NormalizedNet(base_net, x_min, x_max, T_min, T_max)
+
+        x = jnp.array([[0.0], [0.5], [1.0]])
+        y = net(x)
+
+        expected = T_min + (T_max - T_min) * (x - x_min) / (x_max - x_min)
+        assert jnp.allclose(y, expected, atol=1e-6)
+
+    def test_normalized_net_jit_compatible(self, seed_key):
+        """Check NormalizedNet is compatible with JIT compilation."""
+        rngs = nnx.Rngs(seed_key)
+        base_net = FCNet(
+            din=1, dmid=16, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
+        )
+        net = NormalizedNet(base_net, x_min=0.0, x_max=1.0, T_min=0.0, T_max=1.0)
+
+        x = jnp.ones((5, 1), dtype=jnp.float32)
+
+        jit_net = jax.jit(net.__call__)
+        y_jit = jit_net(x)
+        y_normal = net(x)
+
+        assert jnp.allclose(y_jit, y_normal, atol=1e-6)
+
+    def test_normalized_net_gradient(self, seed_key):
+        """Check gradients can be computed through NormalizedNet."""
+        rngs = nnx.Rngs(seed_key)
+        base_net = FCNet(
+            din=1, dmid=16, dout=1, num_layers=2, activation=nnx.tanh, rngs=rngs
+        )
+        net = NormalizedNet(base_net, x_min=0.0, x_max=1.0, T_min=0.0, T_max=1.0)
+
+        x = jnp.linspace(0.0, 1.0, 10).reshape(-1, 1)
+
+        def loss_fn(model, x_batch):
+            y = model(x_batch)
+            return jnp.mean(y**2)
+
+        grad_fn = nnx.grad(loss_fn)
+        grads = grad_fn(net, x)
         assert grads is not None
