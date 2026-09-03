@@ -253,12 +253,3 @@ def variable_coefficient_laplacian(
 
     residuals = jax.vmap(residual_at_point)(points_flat)
     return jnp.mean(residuals**2)
-
-
-# Convenience aliases
-laplace_2d = laplacian_2d
-laplace_3d = laplacian_3d
-laplace_nd = laplacian_nd
-heat_2d = heat_equation_2d
-heat_3d = heat_equation_3d
-conv_diff_2d = convection_diffusion_2d
