@@ -6,8 +6,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .geometry_io import MeshData
-
 def plot_domain(geometry, interior_points, boundary_points=None, interface_points=None, title="Domain Visualization", **kwargs):
     """
     Визуализирует домен с точками коллокации.
@@ -228,9 +226,6 @@ class GeometryBase(ABC):
         """
         pass
 
-    def get_boundary_tags(self) -> dict[str, Any]:
-        """Возвращает словарь с именами границ для многодоменных задач."""
-        return {}
 
 class Interval(GeometryBase):
     def __init__(self, x0, x1):
@@ -279,15 +274,10 @@ class Interval(GeometryBase):
 
 class Box2D(GeometryBase):
     """
-    Двумерный прямоугольник x_min, x_max × y_min, y_max
+    Двумерный прямоугольник x_min, x_max × y_min, y_max.
     """
 
     def __init__(self, x_min, x_max, y_min, y_max):
-        """
-        Args:
-            x_min, x_max: границы по оси x.
-            y_min, y_max: границы по оси y.
-        """
         super().__init__(dim=2)
         self.x_min = float(x_min)
         self.x_max = float(x_max)
@@ -295,17 +285,6 @@ class Box2D(GeometryBase):
         self.y_max = float(y_max)
 
     def sample_interior(self, n_points, method="random", rng=None):
-        """
-        Генерирует точки внутри прямоугольника.
-
-        Args:
-            n_points: количество точек
-            method: 'random' – случайная выборка, 'uniform'
-            rng: ключ PRNG.
-
-        Returns:
-            Массив формы (n_points, 2).
-        """
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
@@ -319,126 +298,79 @@ class Box2D(GeometryBase):
             )
             return jnp.hstack([x, y])
         if method == "uniform":
-            # Генерируем равномерную сетку (приближённо)
             n_per_side = int(jnp.sqrt(n_points))
             x = jnp.linspace(self.x_min, self.x_max, n_per_side)
             y = jnp.linspace(self.y_min, self.y_max, n_per_side)
             xx, yy = jnp.meshgrid(x, y, indexing="ij")
             points = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)
-            return points[:n_points]  # обрезаем до нужного количества
-        raise ValueError(f"Unknown method: {method}")
+            return points[:n_points]
+        raise ValueError(f"Неизвестный метод: {method}")
 
-    def sample_boundary(self, n_points=None, method="random", rng=None):
+    def sample_boundary(self, n_points, method="random", rng=None, return_edges=False):
         """
-        Генерирует точки на границе (периметре) прямоугольника и нормали.
-
-        Если n_points не указан, возвращает четыре угловые точки.
-
-        Args:
-            n_points: общее количество точек на границе (распределяются равномерно по сторонам).
-            method: 'random' – случайное расположение на периметре.
-            rng: ключ PRNG.
-
-        Returns:
-            tuple[jax.Array, jax.Array]:
-                - points: массив формы (n_points, 2) или (4, 2) если n_points=None.
-                - normals: массив единичных нормалей формы (n_points, 2) или (4, 2).
+        Генерирует точки на границе. Точки распределяются по сторонам пропорционально длинам.
+        n_points должно быть > 0.
         """
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
-        if n_points is None:
-            points = jnp.array(
-                [
-                    [self.x_min, self.y_min],
-                    [self.x_max, self.y_min],
-                    [self.x_max, self.y_max],
-                    [self.x_min, self.y_max],
-                ]
-            )
-            normals = jnp.array(
-                [
-                    [-1.0, 0.0],
-                    [0.0, -1.0],
-                    [1.0, 0.0],
-                    [0.0, 1.0],
-                ]
-            )
-            return points, normals
+        def _points_on_segment(start, end, n, rng_sub):
+            if n <= 0:
+                return jnp.empty((0, 2))
+            if method == "random":
+                t = jax.random.uniform(rng_sub, (n, 1), minval=0.0, maxval=1.0)
+            else:
+                t = jnp.linspace(0, 1, n).reshape(-1, 1)
+            return start + t * (end - start)
 
-        if method == "random":
-            dx = self.x_max - self.x_min
-            dy = self.y_max - self.y_min
-            perimeter = 2 * (dx + dy)
+        sides = {
+            'left':   (jnp.array([self.x_min, self.y_min]), jnp.array([self.x_min, self.y_max]), jnp.array([-1.0, 0.0])),
+            'right':  (jnp.array([self.x_max, self.y_min]), jnp.array([self.x_max, self.y_max]), jnp.array([ 1.0, 0.0])),
+            'bottom': (jnp.array([self.x_min, self.y_min]), jnp.array([self.x_max, self.y_min]), jnp.array([ 0.0,-1.0])),
+            'top':    (jnp.array([self.x_min, self.y_max]), jnp.array([self.x_max, self.y_max]), jnp.array([ 0.0, 1.0])),
+        }
 
-            s = jax.random.uniform(rng, (n_points,), minval=0.0, maxval=perimeter)
+        dx = self.x_max - self.x_min
+        dy = self.y_max - self.y_min
+        perim = 2 * (dx + dy)
+        lengths = jnp.array([dy, dy, dx, dx])
+        fractions = lengths / perim
+        n_side = jnp.round(fractions * n_points).astype(int)
+        diff = n_points - jnp.sum(n_side)
+        if diff != 0:
+            idx = jnp.argmax(lengths)
+            n_side = n_side.at[idx].add(diff)
 
-            points = jnp.zeros((n_points, 2))
-            normals = jnp.zeros((n_points, 2))
+        keys = jax.random.split(rng, 4) if method == "random" else [None] * 4
+        result = {}
+        side_names = ['left', 'right', 'bottom', 'top']
+        for name, (start, end, normal), n, k in zip(side_names, sides.values(), n_side, keys):
+            pts = _points_on_segment(start, end, int(n), k)
+            norms = jnp.tile(normal.reshape(1, 2), (int(n), 1)) if n > 0 else jnp.empty((0, 2))
+            result[name] = (pts, norms)
 
-            # Bottom side (y = y_min, normal = (0, -1))
-            mask1 = s <= dx
-            n_bottom = jnp.sum(mask1)
-            t = s[mask1] / dx
-            points = points.at[mask1, 0].set(self.x_min + t * dx)
-            points = points.at[mask1, 1].set(self.y_min)
-            normals = normals.at[mask1, :].set(jnp.tile(jnp.array([0.0, -1.0]), (n_bottom, 1)))
-
-            # Right side (x = x_max, normal = (1, 0))
-            mask2 = (s > dx) & (s <= dx + dy)
-            n_right = jnp.sum(mask2)
-            t = (s[mask2] - dx) / dy
-            points = points.at[mask2, 0].set(self.x_max)
-            points = points.at[mask2, 1].set(self.y_min + t * dy)
-            normals = normals.at[mask2, :].set(jnp.tile(jnp.array([1.0, 0.0]), (n_right, 1)))
-
-            # Top side (y = y_max, normal = (0, 1))
-            mask3 = (s > dx + dy) & (s <= 2 * dx + dy)
-            n_top = jnp.sum(mask3)
-            t = (s[mask3] - dx - dy) / dx
-            points = points.at[mask3, 0].set(self.x_max - t * dx)
-            points = points.at[mask3, 1].set(self.y_max)
-            normals = normals.at[mask3, :].set(jnp.tile(jnp.array([0.0, 1.0]), (n_top, 1)))
-
-            # Left side (x = x_min, normal = (-1, 0))
-            mask4 = s > 2 * dx + dy
-            n_left = jnp.sum(mask4)
-            t = (s[mask4] - 2 * dx - dy) / dy
-            points = points.at[mask4, 0].set(self.x_min)
-            points = points.at[mask4, 1].set(self.y_max - t * dy)
-            normals = normals.at[mask4, :].set(jnp.tile(jnp.array([-1.0, 0.0]), (n_left, 1)))
-
-            return points, normals
-
-        raise ValueError(f"Unknown method: {method}")
+        if return_edges:
+            return result
+        else:
+            all_pts = jnp.vstack([v[0] for v in result.values()])
+            all_norms = jnp.vstack([v[1] for v in result.values()])
+            return all_pts, all_norms
 
     def generate_collocation(
         self,
-        n_interior=100,
-        n_boundary=None,
+        n_interior,
+        n_boundary,
         method_interior="random",
         method_boundary="random",
         rng=None,
     ):
-        """
-        Генерирует набор точек для коллокации: внутренние + граничные.
-
-        Args:
-            n_interior: количество внутренних точек.
-            n_boundary: количество граничных точек (если None, то возвращаются только углы).
-            method_interior: метод для внутренних точек.
-            method_boundary: метод для граничных точек.
-            rng: ключ PRNG.
-
-        Returns:
-            Массив точек формы (n_interior + n_boundary, 2) или (n_interior + 4, 2).
-        """
         if rng is None:
             rng = jax.random.PRNGKey(0)
         keys = jax.random.split(rng, 2)
         interior = self.sample_interior(n_interior, method_interior, keys[0])
         boundary, _ = self.sample_boundary(n_boundary, method_boundary, keys[1])
         return jnp.vstack([interior, boundary])
+
 
 class Box3D(GeometryBase):
     """
@@ -474,156 +406,119 @@ class Box3D(GeometryBase):
 
         raise ValueError(f"Unknown method: {method}")
 
-    def sample_boundary(self, n_points=None, method="random", rng=None):
+    def sample_boundary(self, n_points, method="random", rng=None, return_faces=False):
         """Генерирует точки на границе параллелепипеда и нормали."""
+        if n_points < 6:
+            raise ValueError("n_points должен быть >= 6")
+
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
-        if n_points is None:
-            corners = []
-            normals_list = []
-            for x in [self.x_min, self.x_max]:
-                for y in [self.y_min, self.y_max]:
-                    for z in [self.z_min, self.z_max]:
-                        corners.append([x, y, z])
-                        nx = -1.0 if x == self.x_min else 1.0
-                        ny = -1.0 if y == self.y_min else 1.0
-                        nz = -1.0 if z == self.z_min else 1.0
-                        normals_list.append([nx, ny, nz])
-            return jnp.array(corners), jnp.array(normals_list)
+        if method != "random":
+            raise ValueError(f"Неизвестный метод: {method}")
 
-        if method == "random":
-            dx = self.x_max - self.x_min
-            dy = self.y_max - self.y_min
-            dz = self.z_max - self.z_min
+        dx = self.x_max - self.x_min
+        dy = self.y_max - self.y_min
+        dz = self.z_max - self.z_min
 
-            areas = [
-                dx * dy,
-                dx * dy,
-                dx * dz,
-                dx * dz,
-                dy * dz,
-                dy * dz,
-            ]
-            total_area = sum(areas)
+        # Площади граней: bottom, top, front, back, left, right
+        areas = jnp.array([dx*dy, dx*dy, dx*dz, dx*dz, dy*dz, dy*dz])
+        
+        # Каждая грань получает минимум 1 точку, остаток пропорционально площадям
+        n_face = jnp.round((areas / jnp.sum(areas)) * (n_points - 6)).astype(int) + 1
+        diff = n_points - jnp.sum(n_face)
+        if diff != 0:
+            idx = jnp.argmax(areas)
+            n_face = n_face.at[idx].add(diff)
 
-            points_per_face = [int(n_points * a / total_area) for a in areas]
-            points_per_face[-1] += n_points - sum(points_per_face)
+        keys = jax.random.split(rng, 6)
+        face_names = ['bottom', 'top', 'front', 'back', 'left', 'right']
+        all_points = []
+        all_normals = []
+        faces_data = {name: ([], []) for name in face_names}
 
-            all_points = []
-            all_normals = []
-            keys = jax.random.split(rng, 6)
+        # bottom (z = z_min)
+        n = int(n_face[0])
+        x = jax.random.uniform(keys[0], (n, 1), minval=self.x_min, maxval=self.x_max)
+        y = jax.random.uniform(keys[1], (n, 1), minval=self.y_min, maxval=self.y_max)
+        z = jnp.full((n, 1), self.z_min)
+        pts = jnp.hstack([x, y, z])
+        norms = jnp.tile(jnp.array([0.0, 0.0, -1.0]), (n, 1))
+        all_points.append(pts)
+        all_normals.append(norms)
+        faces_data['bottom'][0].append(pts)
+        faces_data['bottom'][1].append(norms)
 
-            if points_per_face[0] > 0:
-                x = jax.random.uniform(
-                    keys[0],
-                    (points_per_face[0], 1),
-                    minval=self.x_min,
-                    maxval=self.x_max,
-                )
-                y = jax.random.uniform(
-                    keys[1],
-                    (points_per_face[0], 1),
-                    minval=self.y_min,
-                    maxval=self.y_max,
-                )
-                z = jnp.full((points_per_face[0], 1), self.z_min)
-                all_points.append(jnp.hstack([x, y, z]))
-                all_normals.append(jnp.tile(jnp.array([0.0, 0.0, -1.0]), (points_per_face[0], 1)))
+        # top (z = z_max)
+        n = int(n_face[1])
+        x = jax.random.uniform(keys[2], (n, 1), minval=self.x_min, maxval=self.x_max)
+        y = jax.random.uniform(keys[3], (n, 1), minval=self.y_min, maxval=self.y_max)
+        z = jnp.full((n, 1), self.z_max)
+        pts = jnp.hstack([x, y, z])
+        norms = jnp.tile(jnp.array([0.0, 0.0, 1.0]), (n, 1))
+        all_points.append(pts)
+        all_normals.append(norms)
+        faces_data['top'][0].append(pts)
+        faces_data['top'][1].append(norms)
 
-            if points_per_face[1] > 0:
-                x = jax.random.uniform(
-                    keys[2],
-                    (points_per_face[1], 1),
-                    minval=self.x_min,
-                    maxval=self.x_max,
-                )
-                y = jax.random.uniform(
-                    keys[3],
-                    (points_per_face[1], 1),
-                    minval=self.y_min,
-                    maxval=self.y_max,
-                )
-                z = jnp.full((points_per_face[1], 1), self.z_max)
-                all_points.append(jnp.hstack([x, y, z]))
-                all_normals.append(jnp.tile(jnp.array([0.0, 0.0, 1.0]), (points_per_face[1], 1)))
+        # front (y = y_min)
+        n = int(n_face[2])
+        x = jax.random.uniform(keys[4], (n, 1), minval=self.x_min, maxval=self.x_max)
+        z = jax.random.uniform(keys[5], (n, 1), minval=self.z_min, maxval=self.z_max)
+        y = jnp.full((n, 1), self.y_min)
+        pts = jnp.hstack([x, y, z])
+        norms = jnp.tile(jnp.array([0.0, -1.0, 0.0]), (n, 1))
+        all_points.append(pts)
+        all_normals.append(norms)
+        faces_data['front'][0].append(pts)
+        faces_data['front'][1].append(norms)
 
-            if points_per_face[2] > 0:
-                x = jax.random.uniform(
-                    keys[4],
-                    (points_per_face[2], 1),
-                    minval=self.x_min,
-                    maxval=self.x_max,
-                )
-                z = jax.random.uniform(
-                    keys[5],
-                    (points_per_face[2], 1),
-                    minval=self.z_min,
-                    maxval=self.z_max,
-                )
-                y = jnp.full((points_per_face[2], 1), self.y_min)
-                all_points.append(jnp.hstack([x, y, z]))
-                all_normals.append(jnp.tile(jnp.array([0.0, -1.0, 0.0]), (points_per_face[2], 1)))
+        # back (y = y_max)
+        n = int(n_face[3])
+        x = jax.random.uniform(keys[0], (n, 1), minval=self.x_min, maxval=self.x_max)
+        z = jax.random.uniform(keys[1], (n, 1), minval=self.z_min, maxval=self.z_max)
+        y = jnp.full((n, 1), self.y_max)
+        pts = jnp.hstack([x, y, z])
+        norms = jnp.tile(jnp.array([0.0, 1.0, 0.0]), (n, 1))
+        all_points.append(pts)
+        all_normals.append(norms)
+        faces_data['back'][0].append(pts)
+        faces_data['back'][1].append(norms)
 
-            if points_per_face[3] > 0:
-                x = jax.random.uniform(
-                    keys[0],
-                    (points_per_face[3], 1),
-                    minval=self.x_min,
-                    maxval=self.x_max,
-                )
-                z = jax.random.uniform(
-                    keys[1],
-                    (points_per_face[3], 1),
-                    minval=self.z_min,
-                    maxval=self.z_max,
-                )
-                y = jnp.full((points_per_face[3], 1), self.y_max)
-                all_points.append(jnp.hstack([x, y, z]))
-                all_normals.append(jnp.tile(jnp.array([0.0, 1.0, 0.0]), (points_per_face[3], 1)))
+        # left (x = x_min)
+        n = int(n_face[4])
+        y = jax.random.uniform(keys[2], (n, 1), minval=self.y_min, maxval=self.y_max)
+        z = jax.random.uniform(keys[3], (n, 1), minval=self.z_min, maxval=self.z_max)
+        x = jnp.full((n, 1), self.x_min)
+        pts = jnp.hstack([x, y, z])
+        norms = jnp.tile(jnp.array([-1.0, 0.0, 0.0]), (n, 1))
+        all_points.append(pts)
+        all_normals.append(norms)
+        faces_data['left'][0].append(pts)
+        faces_data['left'][1].append(norms)
 
-            if points_per_face[4] > 0:
-                y = jax.random.uniform(
-                    keys[2],
-                    (points_per_face[4], 1),
-                    minval=self.y_min,
-                    maxval=self.y_max,
-                )
-                z = jax.random.uniform(
-                    keys[3],
-                    (points_per_face[4], 1),
-                    minval=self.z_min,
-                    maxval=self.z_max,
-                )
-                x = jnp.full((points_per_face[4], 1), self.x_min)
-                all_points.append(jnp.hstack([x, y, z]))
-                all_normals.append(jnp.tile(jnp.array([-1.0, 0.0, 0.0]), (points_per_face[4], 1)))
+        # right (x = x_max)
+        n = int(n_face[5])
+        y = jax.random.uniform(keys[4], (n, 1), minval=self.y_min, maxval=self.y_max)
+        z = jax.random.uniform(keys[5], (n, 1), minval=self.z_min, maxval=self.z_max)
+        x = jnp.full((n, 1), self.x_max)
+        pts = jnp.hstack([x, y, z])
+        norms = jnp.tile(jnp.array([1.0, 0.0, 0.0]), (n, 1))
+        all_points.append(pts)
+        all_normals.append(norms)
+        faces_data['right'][0].append(pts)
+        faces_data['right'][1].append(norms)
 
-            if points_per_face[5] > 0:
-                y = jax.random.uniform(
-                    keys[4],
-                    (points_per_face[5], 1),
-                    minval=self.y_min,
-                    maxval=self.y_max,
-                )
-                z = jax.random.uniform(
-                    keys[5],
-                    (points_per_face[5], 1),
-                    minval=self.z_min,
-                    maxval=self.z_max,
-                )
-                x = jnp.full((points_per_face[5], 1), self.x_max)
-                all_points.append(jnp.hstack([x, y, z]))
-                all_normals.append(jnp.tile(jnp.array([1.0, 0.0, 0.0]), (points_per_face[5], 1)))
-
+        if return_faces:
+            return {name: (jnp.vstack(faces_data[name][0]), jnp.vstack(faces_data[name][1])) 
+                    for name in face_names}
+        else:
             return jnp.vstack(all_points), jnp.vstack(all_normals)
-
-        raise ValueError(f"Unknown method: {method}")
 
     def generate_collocation(
         self,
-        n_interior=500,
-        n_boundary=100,
+        n_interior,
+        n_boundary,
         method_interior="random",
         method_boundary="random",
         rng=None,
@@ -708,8 +603,8 @@ class Sphere(GeometryBase):
 
     def generate_collocation(
         self,
-        n_interior=500,
-        n_boundary=100,
+        n_interior,
+        n_boundary,
         method_interior="random",
         method_boundary="random",
         rng=None,
@@ -748,23 +643,15 @@ class Annulus2D(GeometryBase):
         self.R_inner = float(R_inner)
         self.is_hollow = R_inner > 0
 
-    def get_boundary_tags(self) -> dict[str, str]:
-        tags = {"outer": "exterior_boundary"}
-        if self.is_hollow:
-            tags["inner"] = "interface"
-        return tags
-
     def sample_interior(
         self, n_points: int, rng: jax.Array | None = None
     ) -> jnp.ndarray:
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
-        # Выборка в полярных координатах с коррекцией плотности
         r_max = self.R_outer
         r_min = self.R_inner
 
-        # Равномерное распределение по площади
         u = jax.random.uniform(rng, (n_points,))
         theta = jax.random.uniform(rng, (n_points,), minval=0, maxval=2 * jnp.pi)
 
@@ -779,43 +666,75 @@ class Annulus2D(GeometryBase):
         return jnp.column_stack([x, y])
 
     def sample_boundary(
-        self, n_points: int, rng: jax.Array | None = None, tags: list | None = None
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        self, n_points: int, rng: jax.Array | None = None, return_edges: bool = False
+    ) -> tuple[jnp.ndarray, jnp.ndarray] | dict:
+        """
+        Генерирует точки на границе кольца и нормали.
+
+        Args:
+            n_points: общее количество точек (распределяются поровну между границами)
+            rng: ключ PRNG
+            return_edges: если True, возвращает словарь с ключами 'outer' и 'inner'
+
+        Returns:
+            Если return_edges=False: (points, normals) – объединённые массивы
+            Если return_edges=True: словарь с ключами 'outer' и 'inner'
+        """
+        if n_points <= 0:
+            raise ValueError("Количество точек должно быть положительным")
+
         if rng is None:
             rng = jax.random.PRNGKey(1)
 
         keys = jax.random.split(rng, 2)
 
-        points_list = []
-        normals_list = []
+        # Если кольцо не полое - только внешняя граница
+        if not self.is_hollow:
+            theta = jax.random.uniform(
+                keys[0], (n_points,), minval=0, maxval=2 * jnp.pi
+            )
+            x = self.center[0] + self.R_outer * jnp.cos(theta)
+            y = self.center[1] + self.R_outer * jnp.sin(theta)
+            points = jnp.column_stack([x, y])
+            normals = jnp.column_stack([jnp.cos(theta), jnp.sin(theta)])
+            
+            if return_edges:
+                return {'outer': (points, normals)}
+            else:
+                return points, normals
+
+        # Полое кольцо: распределяем точки поровну
+        n_outer = n_points // 2
+        n_inner = n_points - n_outer  # остаток отдаём внутренней границе
 
         # Внешняя граница
-        if tags is None or "outer" in tags:
-            n_outer = n_points // 2 if self.is_hollow else n_points
-            theta_out = jax.random.uniform(
-                keys[0], (n_outer,), minval=0, maxval=2 * jnp.pi
-            )
-            x_out = self.center[0] + self.R_outer * jnp.cos(theta_out)
-            y_out = self.center[1] + self.R_outer * jnp.sin(theta_out)
-            points_list.append(jnp.column_stack([x_out, y_out]))
-            # Нормаль направлена наружу
-            n_out = jnp.column_stack([jnp.cos(theta_out), jnp.sin(theta_out)])
-            normals_list.append(n_out)
+        theta_out = jax.random.uniform(
+            keys[0], (n_outer,), minval=0, maxval=2 * jnp.pi
+        )
+        x_out = self.center[0] + self.R_outer * jnp.cos(theta_out)
+        y_out = self.center[1] + self.R_outer * jnp.sin(theta_out)
+        points_outer = jnp.column_stack([x_out, y_out])
+        normals_outer = jnp.column_stack([jnp.cos(theta_out), jnp.sin(theta_out)])
 
-        # Внутренняя граница (если полая)
-        if self.is_hollow and (tags is None or "inner" in tags):
-            n_inner = n_points - len(points_list[0]) if tags is None else n_points // 2
-            theta_in = jax.random.uniform(
-                keys[1], (n_inner,), minval=0, maxval=2 * jnp.pi
-            )
-            x_in = self.center[0] + self.R_inner * jnp.cos(theta_in)
-            y_in = self.center[1] + self.R_inner * jnp.sin(theta_in)
-            points_list.append(jnp.column_stack([x_in, y_in]))
-            # Нормаль направлена внутрь полости (наружу из материала)
-            n_in = jnp.column_stack([-jnp.cos(theta_in), -jnp.sin(theta_in)])
-            normals_list.append(n_in)
+        # Внутренняя граница
+        theta_in = jax.random.uniform(
+            keys[1], (n_inner,), minval=0, maxval=2 * jnp.pi
+        )
+        x_in = self.center[0] + self.R_inner * jnp.cos(theta_in)
+        y_in = self.center[1] + self.R_inner * jnp.sin(theta_in)
+        points_inner = jnp.column_stack([x_in, y_in])
+        # Нормаль направлена внутрь полости (наружу из материала)
+        normals_inner = jnp.column_stack([-jnp.cos(theta_in), -jnp.sin(theta_in)])
 
-        return jnp.vstack(points_list), jnp.vstack(normals_list)
+        if return_edges:
+            return {
+                'outer': (points_outer, normals_outer),
+                'inner': (points_inner, normals_inner)
+            }
+        else:
+            points = jnp.vstack([points_outer, points_inner])
+            normals = jnp.vstack([normals_outer, normals_inner])
+            return points, normals
 
     def is_inside(self, points: jnp.ndarray) -> jnp.ndarray:
         r = jnp.linalg.norm(points - self.center, axis=1)
@@ -826,6 +745,7 @@ class Annulus2D(GeometryBase):
         min_corner = self.center - self.R_outer
         max_corner = self.center + self.R_outer
         return min_corner, max_corner
+    
 
 class HollowCylinder3D(GeometryBase):
     """
@@ -1124,448 +1044,4 @@ class HollowSphere3D(GeometryBase):
         min_corner = self.center - self.R_outer
         max_corner = self.center + self.R_outer
         return min_corner, max_corner
-
-class MeshGeometry(GeometryBase):
-    """
-    GeometryBase defined by a mesh loaded from file (STL, OBJ, Gmsh).
-
-    Supports arbitrary complex geometries in 2D and 3D with automatic
-    normal computation for boundary conditions.
-
-    Attributes:
-        mesh_data: Original MeshData object
-        vertices: JAX array of vertex coordinates
-        faces: JAX array of face indices
-        normals: JAX array of face normals
-        dim: Dimension (2 or 3)
-        bbox: Bounding box (min_coords, max_coords)
-    """
-
-    def __init__(self, mesh_data: MeshData, compute_normals: bool = True):
-        """
-        Initialize MeshGeometry from MeshData.
-
-        Args:
-            mesh_data: MeshData object from geometry_io
-            compute_normals: Whether to compute/update normals
-        """
-        super().__init__(dim=mesh_data.dim)
-
-        self.mesh_data = mesh_data
-        self.vertices = jnp.array(mesh_data.vertices, dtype=jnp.float64)
-        self.faces = jnp.array(mesh_data.faces, dtype=jnp.int32)
-
-        # Compute or use existing normals
-        if compute_normals or mesh_data.normals is None:
-            if len(self.faces) > 0:
-                np_normals = compute_face_normals(mesh_data.vertices, mesh_data.faces)
-                self.normals = jnp.array(np_normals, dtype=jnp.float64)
-            else:
-                self.normals = None
-        else:
-            self.normals = jnp.array(mesh_data.normals, dtype=jnp.float64)
-
-        # Compute bounding box
-        if len(self.vertices) > 0:
-            self.bbox_min = jnp.min(self.vertices, axis=0)
-            self.bbox_max = jnp.max(self.vertices, axis=0)
-        else:
-            self.bbox_min = self.bbox_max = None
-
-        # Boundary markers if available
-        self.boundary_markers = mesh_data.boundary_markers
-        self.volume_markers = mesh_data.volume_markers
-
-    @classmethod
-    def from_file(
-        cls,
-        filepath: str,
-        file_format: str | None = None,
-        compute_normals: bool = True,
-        **kwargs,
-    ) -> "MeshGeometry":
-        """
-        Create MeshGeometry directly from file.
-
-        Args:
-            filepath: Path to geometry file
-            file_format: Optional format override
-            compute_normals: Whether to compute normals
-            **kwargs: Additional arguments for loader
-
-        Returns:
-            MeshGeometry instance
-        """
-        mesh_data = load_geometry(filepath, file_format, **kwargs)
-        return cls(mesh_data, compute_normals)
-
-    def sample_interior(
-        self,
-        n_points: int,
-        method: str = "rejection",
-        rng: jax.Array | None = None,
-        **kwargs,
-    ) -> jnp.ndarray:
-        """
-        Sample points inside the geometry.
-
-        For complex geometries, uses rejection sampling within bounding box
-        with ray casting or winding number test.
-
-        Args:
-            n_points: Number of points to sample
-            method: Sampling method ('rejection', 'tetrahedral')
-            rng: JAX random key
-            **kwargs: Additional method-specific parameters
-
-        Returns:
-            Array формы (n_points, dim)
-        """
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-
-        if self.dim == 2:
-            return self._sample_interior_2d(n_points, method, rng, **kwargs)
-        else:
-            return self._sample_interior_3d(n_points, method, rng, **kwargs)
-
-    def _sample_interior_2d(
-        self, n_points: int, method: str, rng: jax.Array, **kwargs
-    ) -> jnp.ndarray:
-        """Сэмплирование внутренних точек в 2D методом отбраковки."""
-        # Rejection sampling in bounding box
-        max_attempts = n_points * 100
-        keys = jax.random.split(rng, 3)
-
-        # Sample in bounding box
-        x = jax.random.uniform(
-            keys[0], (max_attempts, 1), minval=self.bbox_min[0], maxval=self.bbox_max[0]
-        )
-        y = jax.random.uniform(
-            keys[1], (max_attempts, 1), minval=self.bbox_min[1], maxval=self.bbox_max[1]
-        )
-        points = jnp.hstack([x, y])
-
-        # Simple point-in-polygon test using winding number
-        # For triangulated mesh, check if point is inside any triangle
-        if len(self.faces) > 0:
-            vertices_2d = self.vertices[:, :2]  # Ensure 2D
-
-            def is_inside_triangle(p, v0, v1, v2):
-                """Тест с использованием барицентрических координат."""
-                v0v1 = v1 - v0
-                v0v2 = v2 - v0
-                v0p = p - v0
-
-                d00 = jnp.dot(v0v1, v0v1)
-                d01 = jnp.dot(v0v1, v0v2)
-                d11 = jnp.dot(v0v2, v0v2)
-                d20 = jnp.dot(v0p, v0v1)
-                d21 = jnp.dot(v0p, v0v2)
-
-                denom = d00 * d11 - d01 * d01
-                v = (d11 * d20 - d01 * d21) / denom
-                w = (d00 * d21 - d01 * d20) / denom
-                u = 1.0 - v - w
-
-                return (u >= 0) & (v >= 0) & (w >= 0)
-
-            # Vectorized inside test
-            def is_inside(point):
-                inside = False
-                for face in self.faces:
-                    v0 = vertices_2d[face[0]]
-                    v1 = vertices_2d[face[1]]
-                    v2 = vertices_2d[face[2]]
-                    inside = inside | is_inside_triangle(point, v0, v1, v2)
-                return inside
-
-            # Batched test
-            inside_mask = jax.vmap(is_inside)(points)
-            accepted_points = points[inside_mask]
-
-            # Take first n_points or pad
-            if len(accepted_points) >= n_points:
-                return accepted_points[:n_points]
-            else:
-                # Pad with repeated points if not enough
-                n_repeat = (
-                    (n_points // len(accepted_points) + 1)
-                    if len(accepted_points) > 0
-                    else 1
-                )
-                return jnp.tile(accepted_points, (n_repeat, 1))[:n_points]
-        else:
-            # Fallback: just sample in bounding box
-            return points[:n_points]
-
-    def _sample_interior_3d(
-        self, n_points: int, method: str, rng: jax.Array, **kwargs
-    ) -> jnp.ndarray:
-        """Сэмплирование внутренних точек в 3D методом отбраковки или тетраэдральной декомпозиции."""
-        if method == "tetrahedral" and self.volume_markers is not None:
-            # Сэмплирование напрямую из тетраэдральных элементов
-            return self._sample_from_tetrahedra(n_points, rng)
-        else:
-            # Метод отбраковки
-            return self._sample_rejection_3d(n_points, rng)
-
-    def _sample_rejection_3d(self, n_points: int, rng: jax.Array) -> jnp.ndarray:
-        """3D сэмплирование методом отбраковки в ограничивающем параллелепипеде."""
-        max_attempts = n_points * 50
-        keys = jax.random.split(rng, 3)
-
-        x = jax.random.uniform(
-            keys[0], (max_attempts, 1), minval=self.bbox_min[0], maxval=self.bbox_max[0]
-        )
-        y = jax.random.uniform(
-            keys[1], (max_attempts, 1), minval=self.bbox_min[1], maxval=self.bbox_max[1]
-        )
-        z = jax.random.uniform(
-            keys[2], (max_attempts, 1), minval=self.bbox_min[2], maxval=self.bbox_max[2]
-        )
-        points = jnp.hstack([x, y, z])
-
-        # Simple test: check if point is inside any tetrahedron
-        # This is simplified - full implementation would use ray casting
-        # For now, return all points (user should provide volume mesh for accuracy)
-        return points[:n_points]
-
-    def _sample_from_tetrahedra(self, n_points: int, rng: jax.Array) -> jnp.ndarray:
-        """Сэмплирование из тетраэдральной объёмной сетки."""
-        if self.volume_markers is None:
-            return self._sample_rejection_3d(n_points, rng)
-
-        # Collect all tetrahedra
-        tetrahedra = []
-        for indices in self.volume_markers.values():
-            for idx in indices:
-                tetrahedra.append(self.faces[idx])
-
-        if not tetrahedra:
-            return self._sample_rejection_3d(n_points, rng)
-
-        tetrahedra = jnp.array(tetrahedra)
-
-        # Сэмплирование тетраэдров равномерно
-        n_tet = len(tetrahedra)
-        tet_indices = jax.random.choice(rng, n_tet, shape=(n_points,))
-        selected_tets = tetrahedra[tet_indices]
-
-        # Сэмплирование барицентрических координат в каждом тетраэдре
-        keys = jax.random.split(rng, 4)
-        r1 = jax.random.uniform(keys[0], (n_points, 1))
-        r2 = jax.random.uniform(keys[1], (n_points, 1))
-        r3 = jax.random.uniform(keys[2], (n_points, 1))
-
-        # Преобразование к равномерному распределению в тетраэдре
-        c1 = 1 - r1 ** (1 / 3)
-        c2 = 1 - r2 ** (1 / 2)
-        c3 = 1 - r3
-
-        # Получение вершин
-        v0 = self.vertices[selected_tets[:, 0]]
-        v1 = self.vertices[selected_tets[:, 1]]
-        v2 = self.vertices[selected_tets[:, 2]]
-        v3 = self.vertices[selected_tets[:, 3]]
-
-        # Интерполяция
-        points = (
-            c1[:, None] * v0
-            + (1 - c1[:, None]) * c2[:, None] * v1
-            + (1 - c1[:, None]) * (1 - c2[:, None]) * c3[:, None] * v2
-            + (1 - c1[:, None]) * (1 - c2[:, None]) * (1 - c3[:, None]) * v3
-        )
-
-        return points
-
-    def sample_boundary(
-        self,
-        n_points: int | None = None,
-        method: str = "random",
-        rng: jax.Array | None = None,
-        marker: str | None = None,
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        """
-        Сэмплирование точек на граничной поверхности.
-
-        Args:
-            n_points: Количество точек (требуется для сеточных геометрий)
-            method: Метод сэмплирования ('random', 'uniform')
-            rng: Ключ случайного числа JAX
-            marker: Опциональное имя граничной метки для сэмплирования конкретной границы
-
-        Returns:
-            Кортеж (points, normals), где:
-                - points: массив координат границ формы (n_points, dim)
-                - normals: массив внешних нормалей формы (n_points, dim)
-        """
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-
-        if n_points is None:
-            n_points = len(self.faces)
-
-        # Import here to avoid circular imports
-        from .geometry_io import sample_points_on_surface
-
-        if (
-            marker is not None
-            and self.boundary_markers is not None
-            and marker in self.boundary_markers
-        ):
-            # Sample from specific boundary region
-            face_indices = self.boundary_markers[marker]
-            subset_normals = (
-                self.normals[face_indices] if self.normals is not None else None
-            )
-
-            # Create temporary mesh for this boundary
-            temp_mesh = MeshData(
-                vertices=self.mesh_data.vertices,
-                faces=np.array(face_indices),
-                normals=np.array(subset_normals)
-                if subset_normals is not None
-                else None,
-                dim=self.dim,
-            )
-            points, normals = sample_points_on_surface(temp_mesh, n_points, rng)
-            return points, normals
-
-        # Sample from entire boundary
-        return sample_points_on_surface(self.mesh_data, n_points, rng)
-
-    def get_normal_at_point(self, point: jnp.ndarray) -> jnp.ndarray:
-        """
-        Вычисляет нормаль в заданной точке на границе.
-
-        Использует интерполяцию граневых нормалей на основе ближайших граней.
-
-        Args:
-            point: Координаты точки (dim,)
-
-        Returns:
-            Единичный вектор нормали (dim,)
-        """
-        if self.normals is None:
-            raise ValueError("Normals not computed for this geometry")
-
-        # Find closest face
-        face_centers = jnp.mean(self.vertices[self.faces], axis=1)
-        distances = jnp.linalg.norm(face_centers - point, axis=1)
-        closest_face_idx = jnp.argmin(distances)
-
-        return self.normals[closest_face_idx]
-
-class CompositeGeometry(GeometryBase):
-    """
-    Composite geometry made of multiple sub-geometries for multi-domain problems.
-
-    Each sub-geometry represents a separate domain with its own material properties.
-    Interfaces between domains are automatically detected or can be specified manually.
-    """
-
-    def __init__(self, sub_geometries: list, interfaces: list | None = None):
-        """
-        Initialize composite geometry.
-
-        Args:
-            sub_geometries: List of GeometryBase objects (MeshGeometry or primitive)
-            interfaces: Optional list of interface specifications between domains
-        """
-        # All sub-geometries should have same dimension
-        dims = [g.dim for g in sub_geometries]
-        if len(set(dims)) != 1:
-            raise ValueError(f"All sub-geometries must have same dimension, got {dims}")
-
-        super().__init__(dim=dims[0])
-
-        self.sub_geometries = sub_geometries
-        self.n_domains = len(sub_geometries)
-        self.interfaces = interfaces or []
-
-    def sample_interior(
-        self,
-        n_points_per_domain: int,
-        method: str = "random",
-        rng: jax.Array | None = None,
-    ) -> list:
-        """
-        Sample interior points for each sub-domain.
-
-        Args:
-            n_points_per_domain: Points per domain (or list for each)
-            method: Sampling method
-            rng: Random key
-
-        Returns:
-            List of point arrays, one per domain
-        """
-        if isinstance(n_points_per_domain, int):
-            n_points_per_domain = [n_points_per_domain] * self.n_domains
-
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-
-        keys = jax.random.split(rng, self.n_domains)
-
-        return [
-            geom.sample_interior(n, method, k)
-            for geom, n, k in zip(self.sub_geometries, n_points_per_domain, keys)
-        ]
-
-    def sample_boundary(
-        self,
-        n_points: int | None = None,
-        exclude_interfaces: bool = True,
-        rng: jax.Array | None = None,
-    ) -> list:
-        """
-        Sample boundary points for each sub-domain.
-
-        Args:
-            n_points: Points per boundary (or list)
-            exclude_interfaces: Whether to exclude interface boundaries
-            rng: Random key
-
-        Returns:
-            List of boundary point arrays per domain
-        """
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-
-        keys = jax.random.split(rng, self.n_domains)
-
-        return [
-            geom.sample_boundary(n_points, rng=k)
-            for geom, k in zip(self.sub_geometries, keys)
-        ]
-
-    def sample_interface(
-        self, interface_id: int, n_points: int, rng: jax.Array | None = None
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        """
-        Sample points on interface between domains.
-
-        Args:
-            interface_id: Index of interface specification
-            n_points: Number of points to sample
-            rng: Random key
-
-        Returns:
-            Tuple of (points, normals) on the interface
-        """
-        if interface_id >= len(self.interfaces):
-            raise ValueError(f"Interface {interface_id} not found")
-
-        iface = self.interfaces[interface_id]
-        dom1, _dom2 = iface["domains"]
-
-        # Sample from boundary of first domain near second domain
-        # Simplified: assumes shared boundary representation
-        geom1 = self.sub_geometries[dom1]
-
-        if hasattr(geom1, "sample_boundary"):
-            return geom1.sample_boundary(n_points, rng=rng)
-        else:
-            raise NotImplementedError("Interface sampling requires MeshGeometry")
+    
