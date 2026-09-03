@@ -7,7 +7,7 @@ from flax import nnx
 from mpinn.bc import dirichlet_bc
 from mpinn.geom import Interval
 from mpinn.pde import line_1d
-from mpinn.pinn_core import FCNet, denormalize, normalize
+from mpinn.pinn_core import FCNet
 
 
 class TestPINNIntegration:
