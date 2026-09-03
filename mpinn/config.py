@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-
+from typing import Callable, Any, Dict
 import jax.numpy as jnp
 import optax
 from flax import nnx
@@ -12,38 +12,11 @@ from flax import nnx
 
 @dataclass(frozen=True)
 class PhysicsParams:
-    """Физические параметры задачи."""
-
-    x0: float = 0.0
-    x1: float = 1.0
-    T0: float | None = None  # Температура на левой границе (Dirichlet)
-    T1: float | None = None  # Температура на правой границе (Dirichlet)
-    T_inf: float | None = None  # Температура окружающей среды (для Robin)
-    _lambda: float = 1.0  # Теплопроводность
-    h: float = 10.0  # Коэффициент теплоотдачи
-    source_fn: Callable | None = (
-        None  # Функция источника тепла f(x), по умолчанию нет источника
-    )
-
-    def __post_init__(self):
-        # Установка значений по умолчанию
-        if self.T_inf is None:
-            object.__setattr__(self, "T_inf", self.T1 if self.T1 is not None else 500.0)
-
-    @property
-    def alpha(self):
-        """Коэффициент при T в условии Робина: α = h"""
-        return self.h
-
-    @property
-    def beta(self):
-        """Коэффициент при dT/dx в условии Робина: β = λ"""
-        return self._lambda
-
-    @property
-    def gamma(self):
-        """Свободный член в условии Робина: γ = h · T_inf"""
-        return self.h * self.T_inf
+    _lambda: float = 1.0                     # теплопроводность
+    source_fn: Callable | None = None        # объёмный источник
+    T_min: float = 0.0                       # минимальная температура (для нормализации)
+    T_max: float = 1000.0                    # максимальная температура (для нормализации)
+    extra: Dict[str, Any] = field(default_factory=dict)   # произвольные параметры
 
 
 @dataclass

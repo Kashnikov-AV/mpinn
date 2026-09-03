@@ -1,20 +1,19 @@
-"""Core PINN implementation using JAX and Flax NNX."""
+"""
+Ядро реализации PINN на основе JAX и Flax NNX.
+Поддерживает 1D, 2D и 3D задачи.
+"""
 
 from __future__ import annotations
 
 import time
-from functools import partial
 
 import jax.numpy as jnp
-import jax
-import matplotlib.pyplot as plt
 import optax
 from flax import nnx
-from jax import value_and_grad
 
 
 class FCNet(nnx.Module):
-    """Fully connected neural network for PINN."""
+    """Полносвязная нейронная сеть для PINN."""
 
     def __init__(
         self,
@@ -42,37 +41,70 @@ class FCNet(nnx.Module):
         return self.linear_out(x)
 
 
-class PINN:
-    """Physics-Informed Neural Network trainer."""
+class NormalizedNet(nnx.Module):
+    """
+    Обёртка, нормализующая вход и денормализующая выход.
+    Позволяет сети работать с координатами и температурой в диапазоне [0,1],
+    сохраняя физический смысл через аффинное преобразование.
+    """
 
-    def __init__(self, net: FCNet, opt, weights):
-        self.optimizer = nnx.Optimizer(net, opt, wrt=nnx.All)
+    def __init__(self, base_net, x_min, x_max, T_min, T_max):
+        self.base_net = base_net
+        self.x_min = x_min
+        self.x_max = x_max
+        self.T_min = T_min
+        self.T_max = T_max
+
+    def __call__(self, x):
+        x_norm = (x - self.x_min) / (self.x_max - self.x_min + 1e-12)
+        T_norm = self.base_net(x_norm)
+        T = T_norm * (self.T_max - self.T_min) + self.T_min
+        return T
+
+
+class PINN:
+    """
+    Физически-информированная нейронная сеть.
+
+    Attributes:
+        optimizer (nnx.Optimizer): оптимизатор Flax NNX.
+        weights (tuple): веса потерь (pde_weight, bc_weight).
+        net (nnx.Module): нейросеть.
+        phys (PhysicsParams): объёмные физические параметры (теплопроводность, источник и др.).
+    """
+
+    def __init__(self, net, opt, weights, phys=None):
+        """
+        Инициализация PINN.
+
+        Args:
+            net: нейросеть, поддерживающая вызов __call__(x).
+            opt: оптимизатор optax.
+            weights: кортеж (pde_weight, bc_weight).
+            phys: объект PhysicsParams (объёмные параметры).
+        """
+        self.optimizer = nnx.Optimizer(net, opt, wrt=nnx.Param)
         self.weights = weights
         self.net = net
+        self.phys = phys
 
-    def create_loss_fn(self, pde_fn, bc_configs, phys):
+    def create_loss_fn(self, pde_fn, bc_configs):
         """
-        Создает функцию потерь для обучения PINN.
+        Создаёт функцию потерь для обучения PINN.
 
-        Parameters
-        ----------
-        pde_fn : callable
-            Функция вычисления невязок PDE.
-        bc_configs : list[dict]
-            Список конфигураций граничных условий.
-            Каждый словарь содержит:
-            - 'fn': функция вычисления невязок (dirichlet_bc, neumann_bc, robin_bc)
-            - 'points': массив точек границы (N, D)
-            - 'normals': массив нормалей (N, D), если требуется
-            - 'params': дополнительные параметры для функции BC
-        phys : PhysicsParams
-            Физические параметры задачи.
+        Args:
+            pde_fn: функция невязки PDE, принимает (model, x, phys).
+            bc_configs: список конфигураций ГУ. Каждый элемент содержит:
+                - 'fn': функция невязки (dirichlet_bc, neumann_bc, robin_bc)
+                - 'points': точки на границе (N, D)
+                - 'normals': нормали (N, D), если требуется
+                - 'params': словарь с явными числовыми параметрами
 
-        Returns
-        -------
-        callable
-            Функция total_loss(model, x_collocation) -> (total, aux).
+        Returns:
+            callable: функция total_loss(model, x_collocation) -> (total, aux).
         """
+        phys = self.phys
+
         def total_loss(model, x_collocation):
             loss_pde = pde_fn(model, x_collocation, phys)
 
@@ -97,8 +129,20 @@ class PINN:
         return total_loss
 
     @nnx.jit
-    def train_step(self, x_collocation, pde_fn, bc_configs, phys):
-        loss_fn = self.create_loss_fn(pde_fn, bc_configs, phys)
+    def train_step(self, x_collocation, pde_fn, bc_configs):
+        """
+        Один шаг оптимизации.
+
+        Args:
+            x_collocation: точки коллокации (N, D).
+            pde_fn: функция PDE.
+            bc_configs: конфигурации ГУ.
+
+        Returns:
+            dict: потери (total_loss, pde, bc_*).
+        """
+        loss_fn = self.create_loss_fn(pde_fn, bc_configs)
+
         def loss_and_aux(model):
             return loss_fn(model, x_collocation)
 
@@ -112,7 +156,20 @@ class PINN:
             losses[f"bc_{i-1}"] = float(val)
         return losses
 
-    def train_loop(self, x_collocation, pde_fn, bc_configs, phys, num_steps, log_interval=100):
+    def train_loop(self, x_collocation, pde_fn, bc_configs, num_steps, log_interval=100):
+        """
+        Цикл обучения без ранней остановки.
+
+        Args:
+            x_collocation: точки коллокации.
+            pde_fn: функция PDE.
+            bc_configs: конфигурации ГУ.
+            num_steps: количество шагов.
+            log_interval: частота логирования.
+
+        Returns:
+            dict: история потерь.
+        """
         n_bc = len(bc_configs)
         loss_names = ["pde", "bc_total"] + [f"bc_{i}" for i in range(n_bc)]
         history = {"steps": [], "total_loss": []}
@@ -120,7 +177,7 @@ class PINN:
             history[name] = []
 
         for step in range(num_steps):
-            losses = self.train_step(x_collocation, pde_fn, bc_configs, phys)
+            losses = self.train_step(x_collocation, pde_fn, bc_configs)
             if step % log_interval == 0 or step == num_steps - 1:
                 history["steps"].append(step)
                 history["total_loss"].append(losses["total_loss"])
@@ -128,17 +185,29 @@ class PINN:
                     history[name].append(losses.get(name, losses["total_loss"]))
         return history
 
-    def fit(self, x_collocation, pde_fn, bc_configs, phys, epochs):
+    def fit(self, x_collocation, pde_fn, bc_configs, epochs, log_interval=100):
+        """
+        Запуск обучения.
+
+        Returns:
+            tuple: (history, training_time_seconds)
+        """
         start_time = time.perf_counter()
-        history = self.train_loop(x_collocation, pde_fn, bc_configs, phys, epochs)
+        history = self.train_loop(x_collocation, pde_fn, bc_configs, epochs, log_interval)
         end_time = time.perf_counter()
         return history, end_time - start_time
 
     def predict(self, x_test):
+        """Возвращает предсказания температуры в точках x_test."""
         return self.optimizer.model(x_test)
 
     def compute_metrics(self, x_test, T_pred, T_exact):
-        """Compute error metrics between prediction and exact solution."""
+        """
+        Вычисляет метрики ошибки между предсказанием и точным решением.
+
+        Returns:
+            dict: {'mape', 'mae', 'mse', 'rmse', 'max_error'}
+        """
         diff = T_pred - T_exact
         mse = float(jnp.mean(diff**2))
         mae = float(jnp.mean(jnp.abs(diff)))
@@ -153,83 +222,25 @@ class PINN:
             "max_error": f"{max_error:.4e}",
         }
 
-    def evaluate(self, x_test, exact_fn, phys, bc_names=None):
-        """Evaluate model against exact solution."""
+    def evaluate(self, x_test, exact_fn, phys, bc_info=None):
+        """
+        Оценивает модель на точном решении.
+
+        Args:
+            x_test: тестовые точки.
+            exact_fn: функция точного решения, принимает (x, phys).
+            phys: физические параметры для точного решения.
+            bc_info: словарь {имя_грани: тип_ГУ} (опционально).
+                     Например: {'left': 'dirichlet', 'right': 'robin'}.
+                     Может содержать произвольное число ключей для 1D, 2D, 3D.
+
+        Returns:
+            tuple: (metrics_dict, T_pred, T_exact)
+        """
         T_pred = self.predict(x_test).ravel()
         T_exact = exact_fn(x_test.ravel(), phys)
         metrics = self.compute_metrics(x_test, T_pred, T_exact)
-        if bc_names:
-            metrics["bc_left"] = bc_names[0]
-            metrics["bc_right"] = bc_names[1] if len(bc_names) > 1 else bc_names[0]
+        if bc_info is not None:
+            for name, bc_type in bc_info.items():
+                metrics[f"bc_{name}"] = bc_type
         return metrics, T_pred, T_exact
-
-    def save_plot(self, x_test, T_pred, T_exact, phys, save_path):
-        """Save comparison plot to file."""
-        _fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(
-            x_test.ravel(), T_exact, "b-", label="Аналитическое решение", linewidth=2
-        )
-        ax.plot(x_test.ravel(), T_pred, "r:", label="ФИНС", linewidth=6)
-        ax.set_xlabel("x, м")
-        ax.set_ylabel("T, К")
-        ax.legend(fontsize=14)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=72, bbox_inches="tight")
-        plt.close()
-
-    def show_plot(self, x_test, T_pred, T_exact, phys):
-        """Display comparison plot."""
-        _fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(
-            x_test.ravel(), T_exact, "b-", label="Аналитическое решение", linewidth=2
-        )
-        ax.plot(x_test.ravel(), T_pred, "r:", label="ФИНС", linewidth=6)
-        ax.set_xlabel("x, м")
-        ax.set_ylabel("T, К")
-        ax.legend(fontsize=14)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.show()
-
-
-def normalize(data, min_val, max_val):
-    """
-    Нормализация данных к диапазону [0, 1].
-
-    Parameters
-    ----------
-    data : jax.Array | float
-        Исходные данные.
-    min_val : float
-        Минимальное значение диапазона.
-    max_val : float
-        Максимальное значение диапазона.
-
-    Returns
-    -------
-    jax.Array | float
-        Нормализованные данные в диапазоне [0, 1].
-    """
-    return (data - min_val) / (max_val - min_val)
-
-
-def denormalize(data_norm, min_val, max_val):
-    """
-    Денормализация данных из диапазона [0, 1] обратно в исходный диапазон.
-
-    Parameters
-    ----------
-    data_norm : jax.Array | float
-        Нормализованные данные в диапазоне [0, 1].
-    min_val : float
-        Минимальное значение исходного диапазона.
-    max_val : float
-        Максимальное значение исходного диапазона.
-
-    Returns
-    -------
-    jax.Array | float
-        Восстановленные физические данные.
-    """
-    return data_norm * (max_val - min_val) + min_val

@@ -1,132 +1,82 @@
 """
-Логика запуска экспериментов: обучение с Early Stopping и Grid Search.
+Запуск экспериментов PINN с Grid Search.
+Поддерживает 1D, 2D, 3D.
 """
 
 import os
 import time
-from typing import Any
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import jax
 import jax.numpy as jnp
 import pandas as pd
 from flax import nnx
 
 from mpinn.config import PhysicsParams, TrainConfig, get_activation, get_optimizer
-from mpinn.plotting import save_plot, show_plot
-
-from .bc import dirichlet_bc, neumann_bc, robin_bc
-from .geom import Interval
-from .pinn_core import PINN, FCNet
+from mpinn.geom import GeometryBase
+from mpinn.pinn_core import PINN, FCNet, NormalizedNet
 
 
-def run_experiment_1D(
+def run_experiment(
     config: TrainConfig,
-    phys: PhysicsParams | None = None,
-    pde_fn=None,
-    exact_fn=None,
-    bc_configs_override: list | None = None,
-) -> tuple[dict[str, Any], dict[str, list[float]]]:
-    """
-    Запуск одного эксперимента с Early Stopping.
-
-    Параметры:
-    - config: конфигурация обучения
-    - phys: физические параметры (если None, используются значения по умолчанию)
-    - pde_fn: функция PDE (если None, используется line_1d)
-    - exact_fn: функция точного решения для верификации
-    - bc_configs_override: список конфигураций BC (если None, создаются автоматически)
-
-    Возвращает:
-    - metrics: словарь с метриками (mse, mape, и т.д.)
-    - history: история обучения (losses по эпохам)
-    """
-    from .analytic import line_1d_robin_exact
-    from .pde import line_1d
-
-    if phys is None:
-        phys = PhysicsParams()
-
-    if pde_fn is None:
-        pde_fn = line_1d
-
-    if exact_fn is None:
-        exact_fn = line_1d_robin_exact
-
-    geom = Interval(phys.x0, phys.x1)
-    x_collocation = geom.generate_collocation(
-        n_interior=config.num_points, method="random"
+    geom: GeometryBase,
+    phys: PhysicsParams,
+    pde_fn: Callable,
+    exact_fn: Callable,
+    bc_configs: List[Dict[str, Any]],
+    bc_info: Optional[Dict[str, str]] = None,
+    x_test: Optional[jnp.ndarray] = None,
+) -> Tuple[Dict[str, Any], Dict[str, List[float]]]:
+    """Запускает один эксперимент PINN с нормализацией."""
+    x_collocation = geom.sample_interior(
+        n_points=config.num_points,
+        method="random",
+        rng=jax.random.PRNGKey(0),
     )
 
+    if hasattr(geom, "bounds"):
+        x_min, x_max = geom.bounds
+        if isinstance(x_min, jnp.ndarray) and x_min.ndim == 1:
+            x_min = x_min[0]
+            x_max = x_max[0]
+    elif hasattr(geom, "x0") and hasattr(geom, "x1"):
+        x_min, x_max = geom.x0, geom.x1
+    else:
+        raise ValueError("Не удалось определить границы координат.")
+
+    if not hasattr(phys, "T_min") or not hasattr(phys, "T_max"):
+        raise ValueError("PhysicsParams должен содержать T_min и T_max.")
+
     act_fn = get_activation(config.activation_name)
-    net = FCNet(
-        din=1,
+    base_net = FCNet(
+        din=geom.dim,
         dmid=config.hidden_features,
         dout=1,
         num_layers=config.num_layers,
         activation=act_fn,
         rngs=nnx.Rngs(0),
     )
+    net = NormalizedNet(base_net, x_min, x_max, phys.T_min, phys.T_max)
 
     optimizer = get_optimizer(config.opt_name, lr=config.lr)
-    pinn = PINN(net, opt=optimizer, weights=list(config.weights))
+    pinn = PINN(net, opt=optimizer, weights=list(config.weights), phys=phys)
 
-    if bc_configs_override is not None:
-        bc_configs = bc_configs_override
-    else:
-        boundary_points, boundary_normals = geom.sample_boundary()
-        left_point = boundary_points[0:1]
-        right_point = boundary_points[1:2]
-        left_normal = boundary_normals[0:1]
-        right_normal = boundary_normals[1:2]
-
-        bc_configs = [
-            {
-                'fn': dirichlet_bc,
-                'points': left_point,
-                'params': {'values': phys.T0},
-            },
-            {
-                'fn': robin_bc,
-                'points': right_point,
-                'normals': right_normal,
-                'params': {
-                    'alpha': phys.alpha,
-                    'beta': phys.beta,
-                    'value': phys.gamma,
-                },
-            },
-        ]
-
-    history, training_time = _train_with_early_stopping(
-        pinn=pinn,
+    history, training_time = pinn.fit(
         x_collocation=x_collocation,
         pde_fn=pde_fn,
         bc_configs=bc_configs,
-        phys=phys,
-        max_epochs=config.max_epochs,
-        patience=config.patience,
-        min_delta=config.min_delta,
-        monitor=config.monitor,
+        epochs=config.max_epochs,
+        log_interval=config.log_interval,
     )
 
-    x_test = jnp.linspace(phys.x0, phys.x1, 100).reshape(-1, 1)
+    if x_test is None:
+        x_test = generate_test_points(geom, config.n_test_points)
+
     metrics, T_pred, T_exact = pinn.evaluate(
-        x_test, exact_fn, phys, bc_names=["dirichlet", "robin"]
+        x_test, exact_fn, phys, bc_info=bc_info
     )
-
-    print(
-        f"Эпохи: {len(history['steps'])}, Время: {training_time:.4f}c, MSE: {metrics['mse']}"
-    )
-
-    if config.save_img and config.image_path:
-        os.makedirs(os.path.dirname(config.image_path), exist_ok=True)
-        save_plot(x_test, T_pred, T_exact, phys, save_path=config.image_path)
-
-    if config.show_plot:
-        show_plot(x_test, T_pred, T_exact, phys)
 
     result = {
-        "bc_left": metrics["bc_left"],
-        "bc_right": metrics["bc_right"],
         "training_time": f"{training_time:.4f}",
         "epochs_trained": len(history["steps"]),
         "lr": config.lr,
@@ -135,138 +85,78 @@ def run_experiment_1D(
         "neurons": config.hidden_features,
         "optimizer": config.opt_name,
         "collocation_points": config.num_points,
+        "test_points": config.n_test_points,
         "mape": float(metrics["mape"]),
         "mae": float(metrics["mae"]),
         "mse": float(metrics["mse"]),
         "rmse": float(metrics["rmse"]),
         "max_error": float(metrics["max_error"]),
         "weights": str(config.weights),
+        "T_min": phys.T_min,
+        "T_max": phys.T_max,
     }
+    if bc_info:
+        for name, bc_type in bc_info.items():
+            result[f"bc_{name}"] = bc_type
 
     return result, history
 
 
-def _train_with_early_stopping(
-    pinn: PINN,
-    x_collocation: jnp.ndarray,
-    pde_fn,
-    bc_configs: list,
-    phys: PhysicsParams,
-    max_epochs: int,
-    patience: int,
-    min_delta: float,
-    monitor: str = "total_loss",
-) -> tuple[dict[str, list[float]], float]:
-    """
-    Обучение модели с механизмом Early Stopping.
-
-    Параметры:
-    - pinn: объект PINN
-    - x_collocation: точки коллокации
-    - pde_fn: функция PDE
-    - bc_configs: список конфигураций граничных условий
-    - phys: физические параметры
-    - max_epochs: максимальное число эпох
-    - patience: число эпох без улучшения до остановки
-    - min_delta: минимальное изменение для учета как улучшения
-    - monitor: имя метрики для мониторинга ('total_loss', 'pde', и т.д.)
-
-    Возвращает:
-    - history: история обучения
-    - training_time: время обучения в секундах
-    """
-    from flax import nnx
-
-    best_loss = float("inf")
-    epochs_without_improvement = 0
-    best_state = None
-
-    n_bc = len(bc_configs)
-    history = {
-        "steps": [],
-        "total_loss": [],
-        "pde": [],
-    }
-    for i in range(n_bc):
-        history[f"bc_{i}"] = []
-
-    start_time = time.time()
-
-    for epoch in range(max_epochs):
-        losses = pinn.train_step(x_collocation, pde_fn, bc_configs, phys)
-
-        current_loss = losses.get(monitor, losses["total_loss"])
-
-        history["steps"].append(epoch)
-        history["total_loss"].append(float(losses["total_loss"]))
-        history["pde"].append(float(losses["pde"]))
-        for i in range(n_bc):
-            key = f"bc_{i}"
-            if key in losses:
-                history[key].append(float(losses[key]))
-
-        if current_loss < best_loss - min_delta:
-            best_loss = current_loss
-            epochs_without_improvement = 0
-            best_state = nnx.state(pinn.net)
-        else:
-            epochs_without_improvement += 1
-
-        if epochs_without_improvement >= patience:
-            print(f"Early stopping на эпохе {epoch}. Лучшая потеря: {best_loss:.6f}")
-            break
-
-    if best_state is not None:
-        nnx.update(pinn.net, best_state)
-
-    training_time = time.time() - start_time
-
-    return history, training_time
+def generate_test_points(geom: GeometryBase, n_points: int) -> jnp.ndarray:
+    """Генерирует равномерную сетку тестовых точек."""
+    dim = geom.dim
+    if dim == 1:
+        if hasattr(geom, "x0") and hasattr(geom, "x1"):
+            return jnp.linspace(geom.x0, geom.x1, n_points).reshape(-1, 1)
+        raise ValueError("Нет x0/x1 для 1D.")
+    elif dim == 2:
+        if hasattr(geom, "x_min") and hasattr(geom, "x_max"):
+            pts = int(round(n_points ** (1 / dim)))
+            x = jnp.linspace(geom.x_min, geom.x_max, pts)
+            y = jnp.linspace(geom.y_min, geom.y_max, pts)
+            xx, yy = jnp.meshgrid(x, y, indexing="ij")
+            return jnp.column_stack([xx.ravel(), yy.ravel()])
+        raise ValueError("Нет x_min/x_max для 2D.")
+    elif dim == 3:
+        if hasattr(geom, "x_min") and hasattr(geom, "x_max"):
+            pts = int(round(n_points ** (1 / dim)))
+            x = jnp.linspace(geom.x_min, geom.x_max, pts)
+            y = jnp.linspace(geom.y_min, geom.y_max, pts)
+            z = jnp.linspace(geom.z_min, geom.z_max, pts)
+            xx, yy, zz = jnp.meshgrid(x, y, z, indexing="ij")
+            return jnp.column_stack([xx.ravel(), yy.ravel(), zz.ravel()])
+        raise ValueError("Нет x_min/x_max для 3D.")
+    raise ValueError(f"Размерность {dim} не поддерживается.")
 
 
 def run_grid_search(
-    param_grid: dict[str, list[Any]],
-    base_config: TrainConfig | None = None,
-    phys: PhysicsParams | None = None,
-    csv_path: str = "csv_results/1D_line_robin_results.csv",
-    pde_fn=None,
-    exact_fn=None,
+    param_grid: Dict[str, List[Any]],
+    geom: GeometryBase,
+    phys: PhysicsParams,
+    pde_fn: Callable,
+    exact_fn: Callable,
+    bc_configs: List[Dict[str, Any]],
+    bc_info: Optional[Dict[str, str]] = None,
+    base_config: Optional[TrainConfig] = None,
+    csv_path: str = "csv_results/pinn_results.csv",
 ) -> pd.DataFrame:
-    """
-    Grid Search: перебор комбинаций гиперпараметров.
-
-    Параметры:
-    - param_grid: словарь {имя_параметра: [список_значений]}
-    - base_config: базовая конфигурация (если None, создается новая)
-    - phys: физические параметры
-    - csv_path: путь для сохранения результатов CSV
-    - pde_fn, exact_fn: функции PDE и точного решения
-
-    Возвращает:
-    - DataFrame с результатами всех экспериментов
-    """
+    """Запускает Grid Search по гиперпараметрам."""
     import itertools
 
     if base_config is None:
         base_config = TrainConfig()
 
-    if phys is None:
-        phys = PhysicsParams()
-
-    # Генерация всех комбинаций параметров
     keys = list(param_grid.keys())
     values = [param_grid[k] for k in keys]
     combinations = list(itertools.product(*values))
 
     results = []
-    total_experiments = len(combinations)
-
-    print(f"Запуск Grid Search: {total_experiments} комбинаций")
+    total = len(combinations)
+    print(f"Grid Search: {total} комбинаций")
 
     for i, combo in enumerate(combinations, 1):
-        print(f"Эксперимент {i}/{total_experiments}")
+        print(f"Эксперимент {i}/{total}")
 
-        # Создание конфига для текущей комбинации
         config_dict = {
             "hidden_features": base_config.hidden_features,
             "num_layers": base_config.num_layers,
@@ -274,41 +164,40 @@ def run_grid_search(
             "opt_name": base_config.opt_name,
             "lr": base_config.lr,
             "max_epochs": base_config.max_epochs,
-            "patience": base_config.patience,
-            "min_delta": base_config.min_delta,
+            "n_test_points": base_config.n_test_points,
             "num_points": base_config.num_points,
             "weights": base_config.weights,
+            "log_interval": base_config.log_interval,
             "save_img": False,
             "show_plot": False,
         }
-
-        # Применение текущей комбинации параметров
         for key, value in zip(keys, combo):
             if key in config_dict:
                 config_dict[key] = value
-
         config = TrainConfig(**config_dict)
 
         try:
             result, _ = run_experiment(
                 config=config,
+                geom=geom,
                 phys=phys,
                 pde_fn=pde_fn,
                 exact_fn=exact_fn,
+                bc_configs=bc_configs,
+                bc_info=bc_info,
             )
             results.append(result)
-        except Exception as e:  # noqa: BLE001
-            print(f"Ошибка в эксперименте {i}: {e}")
+        except Exception as e:
+            print(f"Ошибка: {e}")
             continue
 
-    # Сохранение результатов
     if results:
-        df_results = pd.DataFrame(results)
+        df = pd.DataFrame(results)
         os.makedirs(os.path.dirname(csv_path), exist_ok=True)
         header = not os.path.exists(csv_path)
-        df_results.to_csv(csv_path, mode="a", header=header, index=False)
+        df.to_csv(csv_path, mode="a", header=header, index=False)
         print(f"Результаты сохранены в {csv_path}")
-        return df_results
+        return df
     else:
-        print("Нет успешных экспериментов для сохранения.")
+        print("Нет результатов.")
         return pd.DataFrame()
