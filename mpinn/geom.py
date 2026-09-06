@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-def plot_domain(geometry, interior_points, boundary_points=None, interface_points=None, title="Domain Visualization", **kwargs):
+def plot_domain(geometry, interior_points, boundary_points=None, interface_points=None, title="Визуализация домена", **kwargs):
     """
     Визуализирует домен с точками коллокации.
 
@@ -151,58 +151,86 @@ def _plot_2d(interior, boundary=None, interface=None, title="Domain Visualizatio
     plt.show()
 
 
-def _plot_3d(interior, boundary=None, interface=None, title="Domain Visualization", show_normals=False, scale=0.1):
-    """Отрисовка 3D домена"""
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection="3d")
-
-    # Внутренние точки - синие
+def _plot_3d(interior, boundary=None, interface=None, title="Domain Visualization", save_path=None):
+    """
+    Интерактивная 3D визуализация с использованием Plotly.
+    
+    Args:
+        interior: внутренние точки (N, 3)
+        boundary: граничные точки (M, 3) или кортеж (points, normals)
+        interface: точки на интерфейсах (K, 3)
+        title: заголовок
+        save_path: путь для сохранения HTML
+    """
+    import plotly.graph_objects as go
+    import numpy as np
+    
+    fig = go.Figure()
+    
+    # Внутренние точки
     if interior is not None and len(interior) > 0:
-        ax.scatter(
-            interior[:, 0],
-            interior[:, 1],
-            interior[:, 2],
-            c="blue",
-            s=10,
-            alpha=0.5,
-            label="Внутренние точки",
-        )
-
-    # Граничные точки - зеленые
+        fig.add_trace(go.Scatter3d(
+            x=interior[:, 0],
+            y=interior[:, 1],
+            z=interior[:, 2],
+            mode='markers',
+            marker=dict(size=3, color='blue', opacity=0.5),
+            name='Внутренние точки'
+        ))
+    
+    # Граничные точки
     if boundary is not None and len(boundary) > 0:
         if isinstance(boundary, tuple):
-            boundary_pts, _ = boundary
+            boundary_pts, normals = boundary
         else:
             boundary_pts = boundary
-        ax.scatter(
-            boundary_pts[:, 0],
-            boundary_pts[:, 1],
-            boundary_pts[:, 2],
-            c="green",
-            s=20,
-            alpha=0.7,
-            label="Граница",
-        )
-
-    # Точки на интерфейсах - красные
+            normals = None
+        
+        fig.add_trace(go.Scatter3d(
+            x=boundary_pts[:, 0],
+            y=boundary_pts[:, 1],
+            z=boundary_pts[:, 2],
+            mode='markers',
+            marker=dict(size=5, color='green', opacity=0.7),
+            name='Граница'
+        ))
+    
+    # Интерфейсные точки
     if interface is not None and len(interface) > 0:
-        ax.scatter(
-            interface[:, 0],
-            interface[:, 1],
-            interface[:, 2],
-            c="red",
-            s=20,
-            alpha=0.7,
-            label="Интерфейс",
-        )
-
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    ax.set_title(title)
-    ax.legend(loc="best")
-    plt.tight_layout()
-    plt.show()
+        fig.add_trace(go.Scatter3d(
+            x=interface[:, 0],
+            y=interface[:, 1],
+            z=interface[:, 2],
+            mode='markers',
+            marker=dict(size=5, color='red', opacity=0.7),
+            name='Интерфейс'
+        ))
+    
+    fig.update_layout(
+        title=title,
+        scene=dict(
+            xaxis_title='x',
+            yaxis_title='y',
+            zaxis_title='z',
+            aspectmode='data'
+        ),
+        width=1200,
+        height=600,
+        autosize=True,
+        margin=dict(l=0, r=0, b=0, t=40)
+    )
+    
+    if save_path:
+        fig.write_html(save_path)
+        print(f"Сохранено: {save_path}")
+    
+    fig.show(
+        config={
+        'responsive': True,          # адаптивный размер
+        'displayModeBar': True,      # панель инструментов
+        'displaylogo': False,        # скрыть логотип Plotly
+        }
+    )
 
 class GeometryBase(ABC):
     def __init__(self, dim):
@@ -652,8 +680,10 @@ class Annulus2D(GeometryBase):
         r_max = self.R_outer
         r_min = self.R_inner
 
-        u = jax.random.uniform(rng, (n_points,))
-        theta = jax.random.uniform(rng, (n_points,), minval=0, maxval=2 * jnp.pi)
+        # Генерируем u и theta из одного ключа
+        key1, key2 = jax.random.split(rng, 2)
+        u = jax.random.uniform(key1, (n_points,))
+        theta = jax.random.uniform(key2, (n_points,), minval=0, maxval=2 * jnp.pi)
 
         if self.is_hollow:
             r = jnp.sqrt(r_min**2 + u * (r_max**2 - r_min**2))
@@ -663,7 +693,13 @@ class Annulus2D(GeometryBase):
         x = self.center[0] + r * jnp.cos(theta)
         y = self.center[1] + r * jnp.sin(theta)
 
-        return jnp.column_stack([x, y])
+        points = jnp.column_stack([x, y])
+
+        # Перемешиваем точки
+        key3, _ = jax.random.split(rng, 2)
+        points = jax.random.permutation(key3, points, axis=0)
+
+        return points
 
     def sample_boundary(
         self, n_points: int, rng: jax.Array | None = None, return_edges: bool = False
@@ -746,7 +782,6 @@ class Annulus2D(GeometryBase):
         max_corner = self.center + self.R_outer
         return min_corner, max_corner
     
-
 class HollowCylinder3D(GeometryBase):
     """
     3D полый цилиндр (труба) с внутренним и внешним радиусами.
@@ -841,28 +876,30 @@ class HollowCylinder3D(GeometryBase):
         if rng is None:
             rng = jax.random.PRNGKey(1)
 
-        keys = jax.random.split(rng, 4)
+        keys = jax.random.split(rng, 6)  # теперь 6 ключей для 6 поверхностей
         points_list = []
         normals_list = []
 
-        # Распределение точек по поверхностям
-        n_per_surface = n_points // 4
+        # Определяем количество точек на каждую поверхность
+        n_surfaces = 4  # outer_lateral, inner_lateral, bottom, top
+        n_per_surface = n_points // n_surfaces
+        remainder = n_points - n_per_surface * n_surfaces
 
         # 1. Внешняя боковая поверхность
         if tags is None or "outer_lateral" in tags:
+            n_outer = n_per_surface + (remainder if remainder > 0 else 0)
             theta = jax.random.uniform(
-                keys[0], (n_per_surface,), minval=0, maxval=2 * jnp.pi
+                keys[0], (n_outer,), minval=0, maxval=2 * jnp.pi
             )
             z = jax.random.uniform(
-                keys[1], (n_per_surface,), minval=0, maxval=self.height
+                keys[1], (n_outer,), minval=0, maxval=self.height
             )
-            r = jnp.full(n_per_surface, self.radius_outer)
+            r = jnp.full(n_outer, self.radius_outer)
 
             pts = self._cylindrical_to_cartesian(r, theta, z)
             points_list.append(pts)
 
             # Нормаль радиально наружу
-            jnp.array([1.0, 0.0, 0.0])
             ez = self.axis
             if jnp.abs(ez[2]) < 0.9:
                 er_ref = jnp.cross(ez, jnp.array([0.0, 0.0, 1.0]))
@@ -878,13 +915,14 @@ class HollowCylinder3D(GeometryBase):
 
         # 2. Внутренняя боковая поверхность
         if tags is None or "inner_lateral" in tags:
+            n_inner = n_per_surface
             theta = jax.random.uniform(
-                keys[2], (n_per_surface,), minval=0, maxval=2 * jnp.pi
+                keys[2], (n_inner,), minval=0, maxval=2 * jnp.pi
             )
             z = jax.random.uniform(
-                keys[3], (n_per_surface,), minval=0, maxval=self.height
+                keys[3], (n_inner,), minval=0, maxval=self.height
             )
-            r = jnp.full(n_per_surface, self.radius_inner)
+            r = jnp.full(n_inner, self.radius_inner)
 
             pts = self._cylindrical_to_cartesian(r, theta, z)
             points_list.append(pts)
@@ -896,8 +934,46 @@ class HollowCylinder3D(GeometryBase):
             normals_list.append(norm)
 
         # 3. Нижнее основание
-        # ... (аналогично для top и bottom)
+        if tags is None or "bottom" in tags:
+            n_bottom = n_per_surface
+            r = jnp.sqrt(
+                self.radius_inner**2 
+                + jax.random.uniform(keys[4], (n_bottom,)) 
+                * (self.radius_outer**2 - self.radius_inner**2)
+            )
+            theta = jax.random.uniform(
+                keys[5], (n_bottom,), minval=0, maxval=2 * jnp.pi
+            )
+            z = jnp.zeros(n_bottom) + self.center_base[2]
+            
+            pts = self._cylindrical_to_cartesian(r, theta, z)
+            points_list.append(pts)
+            
+            # Нормаль направлена вниз
+            norm = -self.axis
+            normals_list.append(jnp.tile(norm, (n_bottom, 1)))
 
+        # 4. Верхнее основание
+        if tags is None or "top" in tags:
+            n_top = n_per_surface
+            r = jnp.sqrt(
+                self.radius_inner**2 
+                + jax.random.uniform(keys[4], (n_top,))  # можно использовать новые ключи
+                * (self.radius_outer**2 - self.radius_inner**2)
+            )
+            theta = jax.random.uniform(
+                keys[5], (n_top,), minval=0, maxval=2 * jnp.pi
+            )
+            z = jnp.full(n_top, self.height) + self.center_base[2]
+            
+            pts = self._cylindrical_to_cartesian(r, theta, z)
+            points_list.append(pts)
+            
+            # Нормаль направлена вверх
+            norm = self.axis
+            normals_list.append(jnp.tile(norm, (n_top, 1)))
+
+        # Объединяем все точки и нормали
         return jnp.vstack(points_list), jnp.vstack(normals_list)
 
     def is_inside(self, points: jnp.ndarray) -> jnp.ndarray:

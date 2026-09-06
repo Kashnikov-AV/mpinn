@@ -129,39 +129,31 @@ def sphere_1d(model, x, phys):
 @jax.jit(static_argnames=['phys'])
 def laplace_2d(model, x, phys):
     """
-    2D уравнение теплопроводности в декартовых координатах.
-    λ(T) * (∂²T/∂x² + ∂²T/∂y²) + λ'(T) * ((∂T/∂x)² + (∂T/∂y)²) + f(x,y) = 0
+    2D уравнение теплопроводности в декартовых координатах (постоянная λ).
+    λ * (∂²T/∂x² + ∂²T/∂y²) + f(x,y) = 0
     """
     def predict(x_pts):
         return model(jnp.atleast_2d(x_pts)).ravel()[0]
 
     grad_fn = jax.grad(predict)
 
-    def laplacian_pt(x_pt):
-        g = grad_fn(x_pt)
-        d2x = jax.grad(lambda p: grad_fn(p)[0])(x_pt)
-        d2y = jax.grad(lambda p: grad_fn(p)[1])(x_pt)
-        return d2x + d2y
+    # Вторая производная по x
+    def d2dx(x_pt):
+        return jax.grad(lambda p: grad_fn(p)[0])(x_pt)
 
-    laplacian = jax.vmap(laplacian_pt)(x)
-    grad_vals = jax.vmap(grad_fn)(x)  # (N,2)
+    # Вторая производная по y
+    def d2dy(x_pt):
+        return jax.grad(lambda p: grad_fn(p)[1])(x_pt)
 
-    T_pred = model(x).ravel()
-
-    if callable(phys._lambda):
-        lambda_vals = jax.vmap(phys._lambda)(T_pred)
-        dlambda_dT = jax.vmap(jax.grad(phys._lambda))(T_pred)
-    else:
-        lambda_vals = phys._lambda * jnp.ones_like(T_pred)
-        dlambda_dT = jnp.zeros_like(T_pred)
-
-    grad_sq = jnp.sum(grad_vals ** 2, axis=1)
+    d2x = jax.vmap(d2dx)(x)  # (N,)
+    d2y = jax.vmap(d2dy)(x)  # (N,)
+    laplacian = d2x + d2y     # (N,)
 
     source_val = 0.0
     if phys.source_fn is not None:
-        source_val = phys.source_fn(x)
+        source_val = phys.source_fn(x).ravel()  # (N,)
 
-    residual = lambda_vals * laplacian + dlambda_dT * grad_sq + source_val
+    residual = phys._lambda * laplacian + source_val
     return jnp.mean(residual ** 2)
 
 

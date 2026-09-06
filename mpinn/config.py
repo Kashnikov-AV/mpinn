@@ -21,7 +21,6 @@ class PhysicsParams:
     T_max: float                       # максимальная температура (для нормализации)
     source_fn: Optional[Callable] = None   # объёмный источник (опционально)
 
-
 @dataclass
 class TrainConfig:
     # Обязательные поля (без дефолтов) — идут первыми
@@ -38,7 +37,6 @@ class TrainConfig:
     log_interval: int = 100
     weights: tuple[float, float] = (1.0, 1.0)
 
-
 def get_activation(name: str):
     """Фабрика функций активации."""
     mapping = {
@@ -51,7 +49,6 @@ def get_activation(name: str):
     }
     return mapping.get(name, nnx.relu)
 
-
 def get_optimizer(name: str, lr: float):
     """Фабрика оптимизаторов."""
     mapping = {
@@ -61,3 +58,18 @@ def get_optimizer(name: str, lr: float):
         "rmsprop": optax.rmsprop(lr),
     }
     return mapping.get(name, optax.adam(lr))
+
+def normalize_coords(coords, x_min, x_max):
+    rng = x_max - x_min + (x_max == x_min) * 1e-8
+    return (coords - x_min) / rng
+
+def normalize_temp(temps, t_max=None):
+    if t_max is None:
+        t_max = temps.max()
+    return temps / (t_max + (t_max == 0) * 1e-8)
+
+def denormalize_coords(coords, x_min, x_max):
+    return coords * (x_max - x_min) + x_min
+
+def denormalize_temp(temp, t_max):
+    return temp * t_max

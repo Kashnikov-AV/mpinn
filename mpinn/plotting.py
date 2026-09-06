@@ -166,6 +166,61 @@ def plot_2d_contour(
     else:
         plt.close()
 
+def plot_2d(
+    geom: "GeometryBase",
+    predict_fn: Callable[[np.ndarray], np.ndarray],
+    resolution: int = 50,
+    title: str = "Температурное поле",
+    xlabel: str = "x, м",
+    ylabel: str = "y, м",
+    save_path: Optional[str] = None,
+    show: bool = True,
+    cmap: str = "jet",
+) -> None:
+    """Строит пиксельный график температуры на 2D области."""
+    if geom.dim != 2:
+        raise ValueError("plot_2d поддерживает только 2D геометрию.")
+
+    if hasattr(geom, "x_min") and hasattr(geom, "x_max"):
+        x_min, x_max = geom.x_min, geom.x_max
+        y_min, y_max = geom.y_min, geom.y_max
+    else:
+        try:
+            min_corner, max_corner = geom.bounds
+            x_min, y_min = min_corner[0], min_corner[1]
+            x_max, y_max = max_corner[0], max_corner[1]
+        except AttributeError:
+            raise ValueError("Не удалось определить границы геометрии.")
+
+    x = np.linspace(x_min, x_max, resolution)
+    y = np.linspace(y_min, y_max, resolution)
+    X, Y = np.meshgrid(x, y, indexing="ij")
+    points = np.column_stack([X.ravel(), Y.ravel()])
+
+    T = predict_fn(points).reshape(resolution, resolution)
+
+    plt.figure(figsize=(8, 6))
+    plt.imshow(
+        T.T,
+        extent=[x_min, x_max, y_min, y_max],
+        origin='lower',
+        cmap=cmap,
+        aspect='auto',
+        interpolation='nearest'
+    )
+    plt.colorbar(label="T, К")
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.tight_layout()
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=72, bbox_inches="tight")
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
 def plot_3d_slices(
     geom: "GeometryBase",

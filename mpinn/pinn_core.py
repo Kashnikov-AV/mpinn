@@ -8,6 +8,8 @@ from __future__ import annotations
 import time
 import jax
 import jax.numpy as jnp
+import optax
+from functools import partial
 from flax import nnx
 
 
@@ -58,21 +60,27 @@ class NormalizedNet(nnx.Module):
 
 
 class PINN:
-    """Физически-информированная нейронная сеть."""
+    """Физически-информированная нейронная сеть (Функциональный JAX + Optax)."""
 
     def __init__(self, net, opt, weights, phys, pde_fn, bc_configs):
-        # Модель хранится отдельно, оптимизатор – только состояние
-        self.net = net
-        self.optimizer = nnx.ModelAndOptimizer(self.net, opt, wrt=nnx.Param)
+        # Разделяем модель на граф (структуру) и параметры (веса)
+        self.graphdef, self.params = nnx.split(net)
+        
+        # Инициализируем optax оптимизатор и его состояние
+        self.tx = opt  # Это должен быть optax.GradientTransformation
+        self.opt_state = self.tx.init(self.params)
+        
         self.weights = weights
         self.phys = phys
         self.pde_fn = pde_fn
         self.bc_configs = bc_configs
 
     def create_loss_fn(self):
+        # Захватываем контекст в замыкание
         phys = self.phys
         pde_fn = self.pde_fn
         bc_configs = self.bc_configs
+        weights = self.weights
 
         def total_loss(model, x_collocation):
             loss_pde = pde_fn(model, x_collocation, phys)
@@ -92,42 +100,60 @@ class PINN:
                 loss_bcs.append(jnp.mean(residuals ** 2))
 
             loss_bc_total = sum(loss_bcs) if loss_bcs else 0.0
-            total = self.weights[0] * loss_pde + self.weights[1] * loss_bc_total
+            total = weights[0] * loss_pde + weights[1] * loss_bc_total
             return total, (loss_pde, *loss_bcs)
 
         return total_loss
 
-    @nnx.jit(static_argnums=(0,))
-    def train_step(self, optimizer, x_collocation):
-        loss_fn = self.create_loss_fn()
-
-        def loss_and_aux(model):
+    @partial(jax.jit, static_argnames=['self', 'graphdef', 'tx', 'loss_fn'])
+    def train_step(self, params, graphdef, x_collocation, tx, opt_state, loss_fn):
+        def closure(p):
+            # Собираем модель обратно из графа и параметров
+            model = nnx.merge(graphdef, p)
             return loss_fn(model, x_collocation)
-
-        (total, aux), grads = nnx.value_and_grad(loss_and_aux, has_aux=True)(optimizer.model)
-        optimizer.update(grads)
-
-        losses = {"total_loss": total}
-        losses["pde"] = aux[0]
-        losses["bc_total"] = jnp.sum(jnp.array(aux[1:])) if len(aux) > 1 else 0.0
-        for i, val in enumerate(aux[1:], start=1):
-            losses[f"bc_{i-1}"] = val
-        return losses
+            
+        # Считаем градиенты
+        (total_loss, aux_losses), grads = jax.value_and_grad(closure, has_aux=True)(params)
+        
+        # Обновляем состояние оптимизатора (в новых optax нужно передавать params)
+        updates, new_opt_state = tx.update(grads, opt_state, params)
+        
+        # Применяем обновления к весам
+        new_params = optax.apply_updates(params, updates)
+        
+        return new_params, new_opt_state, total_loss, aux_losses
 
     def train_loop(self, x_collocation, num_steps, log_interval=100):
+        loss_fn = self.create_loss_fn()
+        
         n_bc = len(self.bc_configs)
         loss_names = ["pde", "bc_total"] + [f"bc_{i}" for i in range(n_bc)]
         history = {"steps": [], "total_loss": []}
         for name in loss_names:
             history[name] = []
 
+        curr_params, curr_opt_state = self.params, self.opt_state
+        
         for step in range(num_steps):
-            losses = self.train_step(self.optimizer, x_collocation)
+            # Явно передаем params и opt_state
+            curr_params, curr_opt_state, total_loss, aux_losses = self.train_step(
+                curr_params, self.graphdef, x_collocation, self.tx, curr_opt_state, loss_fn
+            )
+            
             if step % log_interval == 0 or step == num_steps - 1:
                 history["steps"].append(step)
-                history["total_loss"].append(float(losses["total_loss"]))
-                for name in loss_names:
-                    history[name].append(losses.get(name, losses["total_loss"]))
+                history["total_loss"].append(float(total_loss))
+                
+                history["pde"].append(float(aux_losses[0]))
+                bc_total = float(sum(aux_losses[1:])) if len(aux_losses) > 1 else 0.0
+                history["bc_total"].append(bc_total)
+                
+                for i, val in enumerate(aux_losses[1:], start=1):
+                    history[f"bc_{i-1}"].append(float(val))
+                    
+        # Сохраняем финальное состояние
+        self.params = curr_params
+        self.opt_state = curr_opt_state
         return history
 
     def fit(self, x_collocation, epochs, log_interval=100):
@@ -137,7 +163,9 @@ class PINN:
         return history, end_time - start_time
 
     def predict(self, x_test):
-        return self.net(x_test)
+        # Собираем модель для инференса
+        model = nnx.merge(self.graphdef, self.params)
+        return model(x_test)
 
     def compute_metrics(self, x_test, T_pred, T_exact):
         diff = T_pred - T_exact

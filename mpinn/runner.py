@@ -189,7 +189,7 @@ def run_grid_search(
             "activation_name": base_config.activation_name,
             "opt_name": base_config.opt_name,
             "lr": base_config.lr,
-            "max_epochs": base_config.max_epochs,
+            "epochs": base_config.epochs,
             "n_test_points": base_config.n_test_points,
             "num_points": base_config.num_points,
             "weights": base_config.weights,
