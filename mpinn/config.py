@@ -17,13 +17,12 @@ class PhysicsParams:
     Все основные параметры должны быть переданы явно.
     """
     _lambda: float                     # теплопроводность
-    T_min: float                       # минимальная температура (для нормализации)
     T_max: float                       # максимальная температура (для нормализации)
     source_fn: Optional[Callable] = None   # объёмный источник (опционально)
 
 @dataclass
 class TrainConfig:
-    # Обязательные поля (без дефолтов) — идут первыми
+    # Обязательные поля
     hidden_features: int
     num_layers: int
     activation_name: str

@@ -11,8 +11,6 @@ import jax.numpy as jnp
 
 
 # ==================== 1D задачи ====================
-
-@jax.jit(static_argnames=['phys'])
 def line_1d(model, x, phys):
     """
     1D уравнение теплопроводности в декартовых координатах.
@@ -47,8 +45,6 @@ def line_1d(model, x, phys):
     residual = lambda_vals * laplacian + dlambda_dT * grad_sq + source_val
     return jnp.mean(residual ** 2)
 
-
-@jax.jit(static_argnames=['phys'])
 def cylinder_1d(model, x, phys):
     """
     1D уравнение теплопроводности в цилиндрических координатах (осесимметричное).
@@ -85,8 +81,6 @@ def cylinder_1d(model, x, phys):
     residual = lambda_vals * laplacian + dlambda_dT * grad_sq + source_val
     return jnp.mean(residual ** 2)
 
-
-@jax.jit(static_argnames=['phys'])
 def sphere_1d(model, x, phys):
     """
     1D уравнение теплопроводности в сферических координатах (сферически-симметричное).
@@ -125,8 +119,6 @@ def sphere_1d(model, x, phys):
 
 
 # ==================== 2D задачи ====================
-
-@jax.jit(static_argnames=['phys'])
 def laplace_2d(model, x, phys):
     """
     2D уравнение теплопроводности в декартовых координатах (постоянная λ).
@@ -155,9 +147,7 @@ def laplace_2d(model, x, phys):
 
     residual = phys._lambda * laplacian + source_val
     return jnp.mean(residual ** 2)
-
-
-@jax.jit(static_argnames=['phys'])
+)
 def polar_2d(model, x, phys):
     """
     2D уравнение теплопроводности в полярных координатах (осесимметричное).
@@ -201,8 +191,6 @@ def polar_2d(model, x, phys):
 
 
 # ==================== 3D задачи ====================
-
-@jax.jit(static_argnames=['phys'])
 def laplace_3d(model, x, phys):
     """
     3D уравнение теплопроводности в декартовых координатах.
@@ -241,8 +229,6 @@ def laplace_3d(model, x, phys):
     residual = lambda_vals * laplacian + dlambda_dT * grad_sq + source_val
     return jnp.mean(residual ** 2)
 
-
-@jax.jit(static_argnames=['phys'])
 def cylinder_3d_axisymmetric(model, x, phys):
     """
     3D уравнение теплопроводности в цилиндрических координатах (осесимметричное).
