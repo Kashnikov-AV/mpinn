@@ -69,7 +69,7 @@ class PINN:
         # Инициализируем optax оптимизатор и его состояние
         self.tx = opt  # Это должен быть optax.GradientTransformation
         self.opt_state = self.tx.init(self.params)
-        
+        self.loss_fn = self.create_loss_fn()
         self.weights = weights
         self.phys = phys
         self.pde_fn = pde_fn
@@ -124,8 +124,8 @@ class PINN:
         return new_params, new_opt_state, total_loss, aux_losses
 
     def train_loop(self, x_collocation, num_steps, log_interval=100):
-        loss_fn = self.create_loss_fn()
-        
+        loss_fn = self.loss_fn
+
         n_bc = len(self.bc_configs)
         loss_names = ["pde", "bc_total"] + [f"bc_{i}" for i in range(n_bc)]
         history = {"steps": [], "total_loss": []}
@@ -141,7 +141,6 @@ class PINN:
             )
             
             if step % log_interval == 0 or step == num_steps - 1:
-                history["steps"].append(step)
                 history["total_loss"].append(float(total_loss))
                 
                 history["pde"].append(float(aux_losses[0]))

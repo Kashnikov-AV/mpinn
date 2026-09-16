@@ -71,30 +71,3 @@ def point_source(
         return norm * jnp.exp(-((x - location) ** 2) / (2 * epsilon**2))
 
     return _source
-
-
-def custom_source(func: Callable[[Array], Array]) -> Callable[[Array], Array]:
-    """
-    Обертка для пользовательской функции источника.
-
-    Args:
-        func: Пользовательская функция f(x).
-
-    Returns:
-        Та же функция.
-    """
-    return func
-
-
-def no_source() -> Callable[[Array], Array]:
-    """
-    Возвращает функцию нулевого источника (однородное уравнение).
-
-    Returns:
-        Функция, всегда возвращающая 0.
-    """
-
-    def _source(x: Array) -> Array:
-        return jnp.zeros_like(x)
-
-    return _source

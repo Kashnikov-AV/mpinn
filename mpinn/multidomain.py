@@ -290,7 +290,6 @@ class MPINN:
                 curr_params, loss_fn
             )
             if step % log_interval == 0 or step == num_steps - 1:
-                history["steps"].append(step)
                 history["total_loss"].append(float(total))
                 for name, val in zip(loss_names, aux):
                     history[name].append(float(val))

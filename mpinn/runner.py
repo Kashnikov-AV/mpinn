@@ -117,8 +117,10 @@ def run_experiment(
     )
 
     # ---------- 4. Функция оценки ----------
-    def evaluate():
-        T_pred = pinn.predict(x_test).ravel()
+    @jax.jit
+    def evaluate(params):
+        model = nnx.merge(pinn.graphdef, params)
+        T_pred = model(x_test).ravel()
         T_exact = exact_fn(x_test, phys).ravel()
         return compute_rl2(T_pred, T_exact)
 
@@ -156,7 +158,7 @@ def run_experiment(
     pinn.params = best_params
 
     # ---------- 7. Финальные метрики ----------
-    final_rl2 = evaluate()
+    final_rl2 = float(evaluate(pinn.params))
     T_pred = pinn.predict(x_test).ravel()
     T_exact = exact_fn(x_test, phys).ravel()
 
@@ -203,9 +205,7 @@ def compute_rl2(T_pred, T_exact, eps: float = 1e-12) -> float:
     """Относительная L2-ошибка."""
     T_pred = T_pred.ravel()
     T_exact = T_exact.ravel()
-    return float(
-        jnp.linalg.norm(T_pred - T_exact) / (jnp.linalg.norm(T_exact) + eps)
-    )
+    return jnp.linalg.norm(T_pred - T_exact) / (jnp.linalg.norm(T_exact) + eps)
 
 
 def run_grid_search(

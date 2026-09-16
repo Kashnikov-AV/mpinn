@@ -50,13 +50,16 @@ def get_activation(name: str):
 
 def get_optimizer(name: str, lr: float):
     """Фабрика оптимизаторов."""
-    mapping = {
-        "adam": optax.adam(lr),
-        "sgd": optax.sgd(lr),
-        "adagrad": optax.adagrad(lr),
-        "rmsprop": optax.rmsprop(lr),
-    }
-    return mapping.get(name, optax.adam(lr))
+    name = name.lower()
+    if name == "adam":
+        return optax.adam(lr)
+    if name == "sgd":
+        return optax.sgd(lr)
+    if name == "adagrad":
+        return optax.adagrad(lr)
+    if name == "rmsprop":
+        return optax.rmsprop(lr)
+    raise ValueError(f"Неизвестный оптимизатор: {name}.")
 
 def normalize_coords(coords, x_min, x_max):
     rng = x_max - x_min + (x_max == x_min) * 1e-8
