@@ -147,7 +147,7 @@ def laplace_2d(model, x, phys):
 
     residual = phys._lambda * laplacian + source_val
     return jnp.mean(residual ** 2)
-)
+
 def polar_2d(model, x, phys):
     """
     2D уравнение теплопроводности в полярных координатах (осесимметричное).
