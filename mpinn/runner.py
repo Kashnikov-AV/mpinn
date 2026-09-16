@@ -141,7 +141,7 @@ def run_experiment(
         for key, values in hist.items():
             history.setdefault(key, []).extend(values)
 
-        rl2 = evaluate()
+        rl2 = evaluate(pinn.params)
         
         if rl2 < best_rl2:
             best_rl2 = rl2

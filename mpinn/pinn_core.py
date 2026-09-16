@@ -69,11 +69,12 @@ class PINN:
         # Инициализируем optax оптимизатор и его состояние
         self.tx = opt  # Это должен быть optax.GradientTransformation
         self.opt_state = self.tx.init(self.params)
-        self.loss_fn = self.create_loss_fn()
-        self.weights = weights
+        
         self.phys = phys
+        self.weights = weights
         self.pde_fn = pde_fn
         self.bc_configs = bc_configs
+        self.loss_fn = self.create_loss_fn()
 
     def create_loss_fn(self):
         # Захватываем контекст в замыкание
