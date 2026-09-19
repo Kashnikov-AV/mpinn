@@ -66,10 +66,9 @@ def save_plot(
 def show_history(
     history: Dict[str, List[float]],
     save_path: Optional[str] = None,
-    show_plot: bool = True
 ) -> None:
     """Отображает историю обучения."""
-    steps = history.get("steps", [])
+    steps = list(range(len(history["pde"])))
     if not steps:
         print("Нет данных для отображения истории.")
         return
@@ -104,14 +103,11 @@ def show_history(
     plt.legend(loc="upper right")
     plt.grid(True, alpha=0.3, which="both")
     plt.tight_layout()
-
+    plt.show()
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=72, bbox_inches="tight")
         print(f"График сохранён: {save_path}")
-
-    if show_plot:
-        plt.show()
     else:
         plt.close()
 
@@ -120,12 +116,12 @@ def show_history(
 def plot_2d_contour(
     geom: "GeometryBase",
     predict_fn: Callable[[np.ndarray], np.ndarray],
-    resolution: int = 50,
+    levels: int = 50,
+    resolution = 50,
     title: str = "Температурное поле",
     xlabel: str = "x, м",
     ylabel: str = "y, м",
     save_path: Optional[str] = None,
-    show: bool = True,
 ) -> None:
     """Строит контурный график температуры на 2D области."""
     if geom.dim != 2:
@@ -150,31 +146,28 @@ def plot_2d_contour(
     T = predict_fn(points).reshape(resolution, resolution)
 
     plt.figure(figsize=(8, 6))
-    contour = plt.contourf(X, Y, T, levels=50, cmap="jet")
+    contour = plt.contourf(X, Y, T, levels=levels, cmap="jet")
     plt.colorbar(contour, label="T, К")
     plt.title(title)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.axis("equal")
     plt.tight_layout()
+    
 
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=72, bbox_inches="tight")
-    if show:
-        plt.show()
-    else:
-        plt.close()
+    plt.show()
+    plt.close()
 
 def plot_2d(
     geom: "GeometryBase",
     predict_fn: Callable[[np.ndarray], np.ndarray],
-    resolution: int = 50,
     title: str = "Температурное поле",
     xlabel: str = "x, м",
     ylabel: str = "y, м",
     save_path: Optional[str] = None,
-    show: bool = True,
     cmap: str = "jet",
 ) -> None:
     """Строит пиксельный график температуры на 2D области."""
@@ -192,12 +185,12 @@ def plot_2d(
         except AttributeError:
             raise ValueError("Не удалось определить границы геометрии.")
 
-    x = np.linspace(x_min, x_max, resolution)
-    y = np.linspace(y_min, y_max, resolution)
+    x = np.linspace(x_min, x_max, 50)
+    y = np.linspace(y_min, y_max, 50)
     X, Y = np.meshgrid(x, y, indexing="ij")
     points = np.column_stack([X.ravel(), Y.ravel()])
 
-    T = predict_fn(points).reshape(resolution, resolution)
+    T = predict_fn(points).reshape(50, 50)
 
     plt.figure(figsize=(8, 6))
     plt.imshow(
@@ -217,10 +210,8 @@ def plot_2d(
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=72, bbox_inches="tight")
-    if show:
-        plt.show()
-    else:
-        plt.close()
+    plt.show()
+    plt.close()
 
 def plot_3d_slices(
     geom: "GeometryBase",
@@ -229,7 +220,6 @@ def plot_3d_slices(
     resolution: int = 30,
     title: str = "Срезы температуры",
     save_path: Optional[str] = None,
-    show: bool = True,
 ) -> None:
     """Строит срезы температуры в 3D по плоскостям."""
     if geom.dim != 3:
@@ -307,10 +297,8 @@ def plot_3d_slices(
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=72, bbox_inches="tight")
-    if show:
-        plt.show()
-    else:
-        plt.close()
+    plt.show()
+    plt.close()
 
 
 def plot_3d_surface_plotly(
@@ -320,7 +308,6 @@ def plot_3d_surface_plotly(
     title: str = "3D Температурное поле",
     labels: Optional[Dict[str, str]] = None,
     save_path: Optional[str] = None,
-    show: bool = True,
 ) -> None:
     """
     Создает интерактивный 3D график поверхности с помощью Plotly.
@@ -360,5 +347,4 @@ def plot_3d_surface_plotly(
             fig.write_image(save_path)
         print(f"График сохранён: {save_path}")
 
-    if show:
-        fig.show()
+    fig.show()

@@ -15,9 +15,8 @@ import jax.numpy as jnp
 from flax import nnx
 
 from mpinn.config import PhysicsParams, TrainConfig, get_activation, get_optimizer
-from mpinn.config import normalize_coords, denormalize_temp
 from mpinn.geom import GeometryBase
-from mpinn.pinn_core import PINN, FCNet
+from mpinn.pinn_core import PINN, FCNet, ScaledNet
 
 
 def generate_test_points(geom: GeometryBase, n_points: int) -> jnp.ndarray:
@@ -47,18 +46,7 @@ def generate_test_points(geom: GeometryBase, n_points: int) -> jnp.ndarray:
     raise ValueError(f"Размерность {dim} не поддерживается.")
 
 
-class ScaledNet(nnx.Module):
-    """Обёртка: нормализует вход, денормализует выход (T = T_norm * T_max)."""
 
-    def __init__(self, base, x_min, x_max, T_max):
-        self.base = base
-        self.x_min = x_min
-        self.x_max = x_max
-        self.T_max = T_max
-
-    def __call__(self, x):
-        x_norm = normalize_coords(x, self.x_min, self.x_max)
-        return denormalize_temp(self.base(x_norm), self.T_max)
 
 
 def run_experiment(

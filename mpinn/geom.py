@@ -928,7 +928,7 @@ class Annulus2D(GeometryBase):
             raise ValueError("R_inner должен быть < R_outer")
 
         super().__init__(dim=2)
-        self.center = jnp.array(center, dtype=jnp.float64)
+        self.center = jnp.array(center, dtype=jnp.float32)
         self.R_outer = float(R_outer)
         self.R_inner = float(R_inner)
         self.is_hollow = R_inner > 0
