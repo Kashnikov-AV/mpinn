@@ -74,7 +74,7 @@ def neumann_bc(model, points, normals, flux_values):
 
 
 @jax.jit
-def robin_bc(model, points, normals, alpha, beta, value):
+def robin_bc(model, points, normals, alpha, beta, values):
     """
     Вычисляет невязки граничного условия Робина.
 
@@ -90,7 +90,7 @@ def robin_bc(model, points, normals, alpha, beta, value):
         Коэффициент при температуре.
     beta : float
         Коэффициент при градиенте температуры.
-    value : float | jax.Array
+    values : float | jax.Array
         Заданное значение комбинации.
 
     Returns
@@ -108,10 +108,10 @@ def robin_bc(model, points, normals, alpha, beta, value):
     T_vals = jax.vmap(predict)(points)
     normal_deriv = jnp.sum(grads * normals, axis=1)  # (n_points,)
 
-    # Приводим value к той же форме
-    if jnp.ndim(value) == 0:
-        value = jnp.full_like(T_vals, value)
+    # Приводим values к той же форме
+    if jnp.ndim(values) == 0:
+        values = jnp.full_like(T_vals, values)
     else:
-        value = jnp.ravel(value)
+        values = jnp.ravel(values)
 
-    return alpha * T_vals + beta * normal_deriv - value
+    return alpha * T_vals + beta * normal_deriv - values

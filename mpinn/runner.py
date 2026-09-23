@@ -7,14 +7,16 @@ import os
 import time
 import math
 import gc
-import pandas as pd
+from functools import partial
 
+import pandas as pd
 from typing import Any, Callable, Dict, List, Optional
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
-from mpinn.config import PhysicsParams, TrainConfig, get_activation, get_optimizer
+from mpinn.config import TrainConfig, get_activation, get_optimizer
 from mpinn.geom import GeometryBase
 from mpinn.pinn_core import PINN, FCNet, ScaledNet
 
@@ -46,16 +48,20 @@ def generate_test_points(geom: GeometryBase, n_points: int) -> jnp.ndarray:
     raise ValueError(f"Размерность {dim} не поддерживается.")
 
 
-
+def compute_rl2(T_pred, T_exact, eps: float = 1e-12) -> float:
+    """Относительная L2-ошибка."""
+    T_pred = T_pred.ravel()
+    T_exact = T_exact.ravel()
+    return jnp.linalg.norm(T_pred - T_exact) / (jnp.linalg.norm(T_exact) + eps)
 
 
 def run_experiment(
     config: TrainConfig,
     geom: GeometryBase,
-    phys: PhysicsParams,
-    pde_fn: Callable,
-    exact_fn: Callable,
+    pde_fn: Callable,                    # уже с замкнутыми lam и source_fn
+    exact_fn: Callable,                  # уже с замкнутыми параметрами (фабрика из analytic.py)
     bc_configs: List[Dict],
+    T_max: float,
     bc_info: Optional[Dict] = None,
     geometry_type: Optional[str] = None,
     x_test: Optional[jnp.ndarray] = None,
@@ -67,10 +73,6 @@ def run_experiment(
 ):
     """
     Адаптивное обучение PINN блоками до достижения целевого RL2.
-
-    Обучение идёт блоками по block_epochs эпох. После каждого блока
-    вычисляется RL2 на тестовых точках. При достижении target_rl2
-    обучение останавливается, и возвращается лучшая модель.
     """
     # ---------- 1. Границы области ----------
     if hasattr(geom, "bounds"):
@@ -81,7 +83,6 @@ def run_experiment(
         x_min, x_max = geom.x0, geom.x1
     else:
         raise ValueError("Не удалось определить границы области.")
-    T_max = phys.T_max
 
     # ---------- 2. Точки коллокации и теста ----------
     x_colloc = geom.sample_interior(config.num_points, rng=jax.random.PRNGKey(0))
@@ -99,7 +100,6 @@ def run_experiment(
         model,
         get_optimizer(config.opt_name, config.lr),
         tuple(config.weights),
-        phys,
         pde_fn,
         bc_configs,
     )
@@ -107,9 +107,9 @@ def run_experiment(
     # ---------- 4. Функция оценки ----------
     @jax.jit
     def evaluate(params):
-        model = nnx.merge(pinn.graphdef, params)
-        T_pred = model(x_test).ravel()
-        T_exact = exact_fn(x_test, phys).ravel()
+        m = nnx.merge(pinn.graphdef, params)
+        T_pred = m(x_test).ravel()
+        T_exact = exact_fn(x_test).ravel()
         return compute_rl2(T_pred, T_exact)
 
     # ---------- 5. Адаптивное обучение блоками ----------
@@ -125,12 +125,17 @@ def run_experiment(
     while total_epochs < max_epochs:
         hist, _ = pinn.fit(x_colloc, block, log_interval)
         total_epochs += block
-        
+
+        pr = ""
+        for key in hist.keys():
+            pr += f"{key}:{hist[key][-1]:.3e} | "
+        print(pr)
+
         for key, values in hist.items():
             history.setdefault(key, []).extend(values)
 
-        rl2 = evaluate(pinn.params)
-        
+        rl2 = float(evaluate(pinn.params))
+
         if rl2 < best_rl2:
             best_rl2 = rl2
             best_epoch = total_epochs
@@ -148,20 +153,20 @@ def run_experiment(
     # ---------- 7. Финальные метрики ----------
     final_rl2 = float(evaluate(pinn.params))
     T_pred = pinn.predict(x_test).ravel()
-    T_exact = exact_fn(x_test, phys).ravel()
+    T_exact = exact_fn(x_test).ravel()              # ← без phys
 
-    mae = float(jnp.mean(jnp.abs(T_pred - T_exact)))
-    mse = float(jnp.mean((T_pred - T_exact) ** 2))
-    rmse = float(jnp.sqrt(mse))
+    mae     = float(jnp.mean(jnp.abs(T_pred - T_exact)))
+    mse     = float(jnp.mean((T_pred - T_exact) ** 2))
+    rmse    = float(jnp.sqrt(mse))
     max_err = float(jnp.max(jnp.abs(T_pred - T_exact)))
-    mape = float(jnp.mean(jnp.abs((T_pred - T_exact) / (jnp.abs(T_exact) + 1e-8))))
+    mape    = float(jnp.mean(jnp.abs((T_pred - T_exact) / (jnp.abs(T_exact) + 1e-8))))
 
     # ---------- 8. Формирование результата ----------
     result = {
-        "total_epochs": total_epochs,           # сколько всего прошло эпох
-        "best_epoch": best_epoch,               # эпоха с минимальным RL2
-        "final_rl2": float(final_rl2),          # RL2 после восстановления модели
-        "training_time_sec": total_time,        # общее время обучения, сек
+        "total_epochs": total_epochs,
+        "best_epoch": best_epoch,
+        "final_rl2": float(final_rl2),
+        "training_time_sec": total_time,
         "lr": config.lr,
         "activation_func": config.activation_name,
         "layers": config.num_layers,
@@ -185,24 +190,17 @@ def run_experiment(
     print(f"Лучший RL2: {best_rl2:.2e} на эпохе {best_epoch} | Всего эпох: {total_epochs}")
 
     if return_model:
-        return result,  history, pinn
+        return result, history, pinn
     return result, history
-
-
-def compute_rl2(T_pred, T_exact, eps: float = 1e-12) -> float:
-    """Относительная L2-ошибка."""
-    T_pred = T_pred.ravel()
-    T_exact = T_exact.ravel()
-    return jnp.linalg.norm(T_pred - T_exact) / (jnp.linalg.norm(T_exact) + eps)
 
 
 def run_grid_search(
     param_grid: Dict[str, List[Any]],
     geom: GeometryBase,
-    phys: PhysicsParams,
     pde_fn: Callable,
     exact_fn: Callable,
     bc_configs: List[Dict[str, Any]],
+    T_max: float,
     bc_info: Optional[Dict[str, str]] = None,
     geometry_type: Optional[str] = None,
     base_config: Optional[TrainConfig] = None,
@@ -235,7 +233,6 @@ def run_grid_search(
             "activation_name": base_config.activation_name,
             "opt_name": base_config.opt_name,
             "lr": base_config.lr,
-            "epochs": base_config.epochs,        # не используется в адаптивном режиме
             "n_test_points": base_config.n_test_points,
             "num_points": base_config.num_points,
             "weights": base_config.weights,
@@ -250,10 +247,10 @@ def run_grid_search(
             result, _ = run_experiment(
                 config=config,
                 geom=geom,
-                phys=phys,
                 pde_fn=pde_fn,
                 exact_fn=exact_fn,
                 bc_configs=bc_configs,
+                T_max=T_max,
                 bc_info=bc_info,
                 geometry_type=geometry_type,
                 target_rl2=target_rl2,

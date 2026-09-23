@@ -58,7 +58,7 @@ class ScaledNet(nnx.Module):
 class PINN:
     """Физически-информированная нейронная сеть (Функциональный JAX + Optax)."""
 
-    def __init__(self, net, opt, weights, phys, pde_fn, bc_configs):
+    def __init__(self, net, opt, weights, pde_fn, bc_configs):
         # Разделяем модель на граф (структуру) и параметры (веса)
         self.graphdef, self.params = nnx.split(net)
         
@@ -66,7 +66,6 @@ class PINN:
         self.tx = opt  # Это должен быть optax.GradientTransformation
         self.opt_state = self.tx.init(self.params)
         
-        self.phys = phys
         self.weights = weights
         self.pde_fn = pde_fn
         self.bc_configs = bc_configs
@@ -74,13 +73,13 @@ class PINN:
 
     def create_loss_fn(self):
         # Захватываем контекст в замыкание
-        phys = self.phys
         pde_fn = self.pde_fn
         bc_configs = self.bc_configs
         weights = self.weights
 
         def total_loss(model, x_collocation):
-            loss_pde = pde_fn(model, x_collocation, phys)
+            residuals_pde = pde_fn(model, x_collocation)
+            loss_pde = jnp.mean(residuals_pde ** 2) 
 
             loss_bcs = []
             for bc in bc_configs:
@@ -96,7 +95,7 @@ class PINN:
 
                 loss_bcs.append(jnp.mean(residuals ** 2))
 
-            loss_bc_total = sum(loss_bcs) if loss_bcs else 0.0
+            loss_bc_total = sum(loss_bcs) if loss_bcs else jnp.array(0.0)
             total = weights[0] * loss_pde + weights[1] * loss_bc_total
             return total, (loss_pde, *loss_bcs)
 
@@ -120,7 +119,7 @@ class PINN:
         
         return new_params, new_opt_state, total_loss, aux_losses
 
-    def train_loop(self, x_collocation, num_steps, log_interval=100, print_log=True):
+    def train_loop(self, x_collocation, num_steps, log_interval=100, print_log=False):
         loss_fn = self.loss_fn
 
         n_bc = len(self.bc_configs)
@@ -166,9 +165,9 @@ class PINN:
         self.opt_state = curr_opt_state
         return history
 
-    def fit(self, x_collocation, epochs, log_interval=100):
+    def fit(self, x_collocation, epochs, log_interval=100, print_log=False):
         start_time = time.perf_counter()
-        history = self.train_loop(x_collocation, epochs, log_interval)
+        history = self.train_loop(x_collocation, epochs, log_interval, print_log)
         end_time = time.perf_counter()
         return history, end_time - start_time
 
@@ -192,9 +191,9 @@ class PINN:
             "max_error": f"{max_error:.4e}",
         }
 
-    def evaluate(self, x_test, exact_fn, phys, bc_info=None):
+    def evaluate(self, x_test, exact_fn, bc_info=None):
         T_pred = self.predict(x_test).ravel()
-        T_exact = exact_fn(x_test.ravel(), phys)
+        T_exact = exact_fn(x_test.ravel())
         metrics = self.compute_metrics(x_test, T_pred, T_exact)
         if bc_info is not None:
             for name, bc_type in bc_info.items():
@@ -205,7 +204,7 @@ class PINN:
         """Независимая копия текущих параметров модели."""
         return jax.tree.map(jnp.copy, self.params)
 
-    def _make_rl2_evaluator(self, x_test, exact_fn, phys):
+    def _make_rl2_evaluator(self, x_test, exact_fn):
         """
         Фабрика JIT-компилируемой функции оценки RL2.
 
@@ -220,7 +219,7 @@ class PINN:
         def _rl2(params):
             model = nnx.merge(graphdef, params)
             T_pred = model(x_test).ravel()
-            T_exact = exact_fn(x_test, phys).ravel()
+            T_exact = exact_fn(x_test).ravel()
             return jnp.linalg.norm(T_pred - T_exact) / (
                 jnp.linalg.norm(T_exact) + 1e-12
             )
@@ -251,7 +250,6 @@ class PINN:
         x_collocation,
         x_test,
         exact_fn,
-        phys,
         target_rl2: float = 1e-3,
         block_epochs: int = 50,
         max_epochs: int = 5000,
@@ -271,7 +269,7 @@ class PINN:
         """
         start_time = time.perf_counter()
 
-        rl2_fn = self._make_rl2_evaluator(x_test, exact_fn, phys)
+        rl2_fn = self._make_rl2_evaluator(x_test, exact_fn)
         history: dict[str, list] = {}
         total_epochs = 0
         best_rl2 = float("inf")

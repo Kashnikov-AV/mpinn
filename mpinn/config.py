@@ -3,22 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Any, Dict, Optional
 
 import jax.numpy as jnp
 import optax
 from flax import nnx
 
-
-@dataclass(frozen=True)
-class PhysicsParams:
-    """
-    Физические параметры задачи.
-    Все основные параметры должны быть переданы явно.
-    """
-    _lambda: float                     # теплопроводность
-    T_max: float                       # максимальная температура (для нормализации)
-    source_fn: Optional[Callable] = None   # объёмный источник (опционально)
 
 @dataclass
 class TrainConfig:
@@ -28,7 +17,6 @@ class TrainConfig:
     activation_name: str
     opt_name: str
     lr: float
-    epochs: int
     num_points: int
     n_test_points: int
 
