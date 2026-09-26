@@ -1126,39 +1126,45 @@ class HollowCylinder3D(GeometryBase):
         self.radius_inner = float(radius_inner)
         self.height = float(height)
         self.axis = jnp.array(axis, dtype=jnp.float64)
-        self.axis = self.axis / jnp.linalg.norm(self.axis)  # Нормализация
+        self.axis = self.axis / jnp.linalg.norm(self.axis)
+
+    # ------------------------------------------------------------------ tags
 
     def get_boundary_tags(self) -> dict[str, str]:
         return {
-            "outer_lateral": "exterior_boundary",
-            "inner_lateral": "interface",
+            "outer": "exterior_boundary",
+            "inner": "interface",
             "bottom": "exterior_boundary",
             "top": "exterior_boundary",
         }
 
-    def _cylindrical_to_cartesian(
-        self, r: jnp.ndarray, theta: jnp.ndarray, z: jnp.ndarray
-    ) -> jnp.ndarray:
-        """Преобразование цилиндрических координат в декартовы."""
-        # Локальная система координат
-        ez = self.axis
+    # --------------------------------------------------------------- helpers
 
-        # Базисные векторы перпендикулярные оси
+    def _cylinder_basis(self):
+        """Возвращает (ez, er_ref, etheta_ref) — ортонормированный базис цилиндра."""
+        ez = self.axis
         if jnp.abs(ez[2]) < 0.9:
             er_ref = jnp.cross(ez, jnp.array([0.0, 0.0, 1.0]))
         else:
             er_ref = jnp.cross(ez, jnp.array([1.0, 0.0, 0.0]))
         er_ref = er_ref / jnp.linalg.norm(er_ref)
         etheta_ref = jnp.cross(ez, er_ref)
+        return ez, er_ref, etheta_ref
 
-        # Векторизованное преобразование
+    def _cylindrical_to_cartesian(
+        self, r: jnp.ndarray, theta: jnp.ndarray, z: jnp.ndarray
+    ) -> jnp.ndarray:
+        """Преобразование цилиндрических координат в декартовы."""
+        ez, er_ref, etheta_ref = self._cylinder_basis()
+
         x_local = (
             (r * jnp.cos(theta))[:, None] * er_ref
             + (r * jnp.sin(theta))[:, None] * etheta_ref
             + z[:, None] * ez
         )
-
         return self.center_base + x_local
+
+    # ------------------------------------------------------------ sample points
 
     def sample_interior(
         self, n_points: int, rng: jax.Array | None = None
@@ -1167,17 +1173,84 @@ class HollowCylinder3D(GeometryBase):
             rng = jax.random.PRNGKey(0)
 
         keys = jax.random.split(rng, 3)
-
-        # Равномерное распределение по объему
         u = jax.random.uniform(keys[0], (n_points,))
-        theta = jax.random.uniform(keys[1], (n_points,), minval=0, maxval=2 * jnp.pi)
-        z = jax.random.uniform(keys[2], (n_points,), minval=0, maxval=self.height)
+        theta = jax.random.uniform(keys[1], (n_points,), minval=0.0, maxval=2 * jnp.pi)
+        z = jax.random.uniform(keys[2], (n_points,), minval=0.0, maxval=self.height)
 
         r = jnp.sqrt(
             self.radius_inner**2 + u * (self.radius_outer**2 - self.radius_inner**2)
         )
-
         return self._cylindrical_to_cartesian(r, theta, z)
+
+    # ---------------------------------------------------- boundary by name
+
+    def get_boundary_names(self) -> List[str]:
+        return ['outer', 'inner', 'bottom', 'top']
+
+    def _generate_boundary_points(self, name: str, n: int,
+                                  method="random", rng=None):
+        if rng is None:
+            rng = jax.random.PRNGKey(0)
+
+        ez, er_ref, etheta_ref = self._cylinder_basis()
+
+        if name == 'outer':
+            theta = jax.random.uniform(rng, (n,), minval=0.0, maxval=2 * jnp.pi)
+            z = jax.random.uniform(rng, (n,), minval=0.0, maxval=self.height)
+            r = jnp.full(n, self.radius_outer)
+
+            pts = self._cylindrical_to_cartesian(r, theta, z)
+            norms = (jnp.cos(theta)[:, None] * er_ref
+                     + jnp.sin(theta)[:, None] * etheta_ref)
+            return pts, norms
+
+        elif name == 'inner':
+            theta = jax.random.uniform(rng, (n,), minval=0.0, maxval=2 * jnp.pi)
+            z = jax.random.uniform(rng, (n,), minval=0.0, maxval=self.height)
+            r = jnp.full(n, self.radius_inner)
+
+            pts = self._cylindrical_to_cartesian(r, theta, z)
+            norms = -(jnp.cos(theta)[:, None] * er_ref
+                      + jnp.sin(theta)[:, None] * etheta_ref)
+            return pts, norms
+
+        elif name == 'bottom':
+            u = jax.random.uniform(rng, (n,))
+            theta = jax.random.uniform(rng, (n,), minval=0.0, maxval=2 * jnp.pi)
+            r = jnp.sqrt(self.radius_inner**2
+                         + u * (self.radius_outer**2 - self.radius_inner**2))
+            z = jnp.zeros(n)
+
+            pts = self._cylindrical_to_cartesian(r, theta, z)
+            norms = jnp.tile(-self.axis, (n, 1))
+            return pts, norms
+
+        elif name == 'top':
+            u = jax.random.uniform(rng, (n,))
+            theta = jax.random.uniform(rng, (n,), minval=0.0, maxval=2 * jnp.pi)
+            r = jnp.sqrt(self.radius_inner**2
+                         + u * (self.radius_outer**2 - self.radius_inner**2))
+            z = jnp.full(n, self.height)
+
+            pts = self._cylindrical_to_cartesian(r, theta, z)
+            norms = jnp.tile(self.axis, (n, 1))
+            return pts, norms
+
+        else:
+            raise ValueError(f"Unknown boundary name '{name}' for HollowCylinder3D")
+
+    def sample_boundary_by_name(self, n_points_dict: Dict[str, int],
+                                method="random", rng=None):
+        result = {}
+        keys = jax.random.split(rng, 4) if method == "random" and rng is not None else [None] * 4
+        for i, name in enumerate(self.get_boundary_names()):
+            n = n_points_dict.get(name, 0)
+            if n > 0:
+                pts, norms = self._generate_boundary_points(name, n, method, keys[i])
+                result[name] = (pts, norms)
+        return result
+
+    # ------------------------------------------------------------ sample_boundary
 
     def sample_boundary(
         self, n_points: int, rng: jax.Array | None = None, tags: list | None = None
@@ -1185,108 +1258,44 @@ class HollowCylinder3D(GeometryBase):
         if rng is None:
             rng = jax.random.PRNGKey(1)
 
-        keys = jax.random.split(rng, 6)  # теперь 6 ключей для 6 поверхностей
+        keys = jax.random.split(rng, 8)
         points_list = []
         normals_list = []
 
-        # Определяем количество точек на каждую поверхность
-        n_surfaces = 4  # outer_lateral, inner_lateral, bottom, top
+        n_surfaces = 4
         n_per_surface = n_points // n_surfaces
         remainder = n_points - n_per_surface * n_surfaces
 
-        # 1. Внешняя боковая поверхность
-        if tags is None or "outer_lateral" in tags:
+        # 1. outer
+        if tags is None or "outer" in tags:
             n_outer = n_per_surface + (remainder if remainder > 0 else 0)
-            theta = jax.random.uniform(
-                keys[0], (n_outer,), minval=0, maxval=2 * jnp.pi
-            )
-            z = jax.random.uniform(
-                keys[1], (n_outer,), minval=0, maxval=self.height
-            )
-            r = jnp.full(n_outer, self.radius_outer)
-
-            pts = self._cylindrical_to_cartesian(r, theta, z)
+            pts, norms = self._generate_boundary_points('outer', n_outer, rng=keys[0])
             points_list.append(pts)
+            normals_list.append(norms)
 
-            # Нормаль радиально наружу
-            ez = self.axis
-            if jnp.abs(ez[2]) < 0.9:
-                er_ref = jnp.cross(ez, jnp.array([0.0, 0.0, 1.0]))
-            else:
-                er_ref = jnp.cross(ez, jnp.array([1.0, 0.0, 0.0]))
-            er_ref = er_ref / jnp.linalg.norm(er_ref)
-            etheta_ref = jnp.cross(ez, er_ref)
-
-            norm = (
-                jnp.cos(theta)[:, None] * er_ref + jnp.sin(theta)[:, None] * etheta_ref
-            )
-            normals_list.append(norm)
-
-        # 2. Внутренняя боковая поверхность
-        if tags is None or "inner_lateral" in tags:
-            n_inner = n_per_surface
-            theta = jax.random.uniform(
-                keys[2], (n_inner,), minval=0, maxval=2 * jnp.pi
-            )
-            z = jax.random.uniform(
-                keys[3], (n_inner,), minval=0, maxval=self.height
-            )
-            r = jnp.full(n_inner, self.radius_inner)
-
-            pts = self._cylindrical_to_cartesian(r, theta, z)
+        # 2. inner
+        if tags is None or "inner" in tags:
+            pts, norms = self._generate_boundary_points('inner', n_per_surface, rng=keys[2])
             points_list.append(pts)
+            normals_list.append(norms)
 
-            # Нормаль радиально внутрь (наружу из материала)
-            norm = -(
-                jnp.cos(theta)[:, None] * er_ref + jnp.sin(theta)[:, None] * etheta_ref
-            )
-            normals_list.append(norm)
-
-        # 3. Нижнее основание
+        # 3. bottom
         if tags is None or "bottom" in tags:
-            n_bottom = n_per_surface
-            r = jnp.sqrt(
-                self.radius_inner**2 
-                + jax.random.uniform(keys[4], (n_bottom,)) 
-                * (self.radius_outer**2 - self.radius_inner**2)
-            )
-            theta = jax.random.uniform(
-                keys[5], (n_bottom,), minval=0, maxval=2 * jnp.pi
-            )
-            z = jnp.zeros(n_bottom) + self.center_base[2]
-            
-            pts = self._cylindrical_to_cartesian(r, theta, z)
+            pts, norms = self._generate_boundary_points('bottom', n_per_surface, rng=keys[4])
             points_list.append(pts)
-            
-            # Нормаль направлена вниз
-            norm = -self.axis
-            normals_list.append(jnp.tile(norm, (n_bottom, 1)))
+            normals_list.append(norms)
 
-        # 4. Верхнее основание
+        # 4. top
         if tags is None or "top" in tags:
-            n_top = n_per_surface
-            r = jnp.sqrt(
-                self.radius_inner**2 
-                + jax.random.uniform(keys[4], (n_top,))  # можно использовать новые ключи
-                * (self.radius_outer**2 - self.radius_inner**2)
-            )
-            theta = jax.random.uniform(
-                keys[5], (n_top,), minval=0, maxval=2 * jnp.pi
-            )
-            z = jnp.full(n_top, self.height) + self.center_base[2]
-            
-            pts = self._cylindrical_to_cartesian(r, theta, z)
+            pts, norms = self._generate_boundary_points('top', n_per_surface, rng=keys[6])
             points_list.append(pts)
-            
-            # Нормаль направлена вверх
-            norm = self.axis
-            normals_list.append(jnp.tile(norm, (n_top, 1)))
+            normals_list.append(norms)
 
-        # Объединяем все точки и нормали
         return jnp.vstack(points_list), jnp.vstack(normals_list)
 
+    # ------------------------------------------------------------ is_inside
+
     def is_inside(self, points: jnp.ndarray) -> jnp.ndarray:
-        # Проверка принадлежности точке к полому цилиндру
         vec = points - self.center_base
         z_coord = jnp.dot(vec, self.axis)
         r_vec = vec - z_coord[:, None] * self.axis
@@ -1298,44 +1307,33 @@ class HollowCylinder3D(GeometryBase):
             & (z_coord >= 0)
             & (z_coord <= self.height)
         )
-        
-     # ===== НОВЫЕ МЕТОДЫ =====
-    def get_boundary_names(self) -> List[str]:
-        return ['outer_lateral', 'inner_lateral', 'bottom', 'top']
 
-    def _generate_boundary_points(self, name: str, n: int, method="random", rng=None) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        # Реализуйте генерацию точек и нормалей для каждой грани
-        # Используйте существующую логику из sample_boundary
-        # (здесь я пропускаю полную реализацию, так как она объёмная,
-        # но вы можете адаптировать код из sample_boundary, выделив генерацию для каждой грани)
-        raise NotImplementedError
-
-    def sample_boundary_by_name(self, n_points_dict: Dict[str, int], method="random", rng=None) -> Dict[str, Tuple[jnp.ndarray, jnp.ndarray]]:
-        result = {}
-        for name, n in n_points_dict.items():
-            if n > 0:
-                pts, norms = self._generate_boundary_points(name, n, method, rng)
-                result[name] = (pts, norms)
-        return result
+    # ------------------------------------------------------------ interface
 
     def sample_interface(self, other_geom: 'GeometryBase', n_points: int,
                          self_interface_name: str, other_interface_name: str,
-                         method="random", rng=None) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+                         method="random", rng=None):
         if not isinstance(other_geom, HollowCylinder3D):
             raise TypeError("other_geom must be HollowCylinder3D")
-        pts, normals_self = self._generate_boundary_points(self_interface_name, n_points, method, rng)
+        pts, normals_self = self._generate_boundary_points(
+            self_interface_name, n_points, method, rng)
         normals_other = -normals_self
-        other_pts, _ = other_geom._generate_boundary_points(other_interface_name, n_points, method, rng)
+        other_pts, _ = other_geom._generate_boundary_points(
+            other_interface_name, n_points, method, rng)
         if not jnp.allclose(pts, other_pts):
-            raise ValueError(f"Interface points do not match: self.{self_interface_name} vs other.{other_interface_name}")
+            raise ValueError(
+                f"Interface points do not match: "
+                f"self.{self_interface_name} vs other.{other_interface_name}"
+            )
         return pts, normals_self, normals_other
+
+    # ------------------------------------------------------------ bounds
 
     @property
     def bounds(self) -> tuple[jnp.ndarray, jnp.ndarray]:
         R = self.radius_outer
         H = self.height
-        # Приблизительные границы (bounding box)
-        min_corner = self.center_base - jnp.array([R, R, 0])
+        min_corner = self.center_base - jnp.array([R, R, 0.0])
         max_corner = self.center_base + jnp.array([R, R, H])
         return min_corner, max_corner
 
@@ -1364,8 +1362,12 @@ class HollowSphere3D(GeometryBase):
         self.R_outer = float(R_outer)
         self.R_inner = float(R_inner)
 
+    # ------------------------------------------------------------------ tags
+
     def get_boundary_tags(self) -> dict[str, str]:
         return {"outer": "exterior_boundary", "inner": "interface"}
+
+    # ------------------------------------------------------------ sample points
 
     def sample_interior(
         self, n_points: int, rng: jax.Array | None = None
@@ -1374,8 +1376,6 @@ class HollowSphere3D(GeometryBase):
             rng = jax.random.PRNGKey(0)
 
         keys = jax.random.split(rng, 3)
-
-        # Сферические координаты с равномерным распределением по объему
         u = jax.random.uniform(keys[0], (n_points,))
         v = jax.random.uniform(keys[1], (n_points,))
         w = jax.random.uniform(keys[2], (n_points,))
@@ -1389,6 +1389,61 @@ class HollowSphere3D(GeometryBase):
         z = self.center[2] + r * jnp.cos(phi)
 
         return jnp.column_stack([x, y, z])
+
+    # ---------------------------------------------------- boundary by name
+
+    def get_boundary_names(self) -> List[str]:
+        return ['outer', 'inner']
+
+    def _generate_boundary_points(self, name: str, n: int,
+                                  method="random", rng=None):
+        if rng is None:
+            rng = jax.random.PRNGKey(0)
+
+        if name == 'outer':
+            R = self.R_outer
+            sign = 1.0
+        elif name == 'inner':
+            R = self.R_inner
+            sign = -1.0
+        else:
+            raise ValueError(f"Unknown boundary name '{name}' for HollowSphere3D")
+
+        keys = jax.random.split(rng, 2)
+        theta = 2 * jnp.pi * jax.random.uniform(keys[0], (n,))
+        phi = jnp.arccos(2 * jax.random.uniform(keys[1], (n,)) - 1)
+
+        sin_phi = jnp.sin(phi)
+        cos_phi = jnp.cos(phi)
+        sin_t = jnp.sin(theta)
+        cos_t = jnp.cos(theta)
+
+        # Точки
+        x = self.center[0] + R * sin_phi * cos_t
+        y = self.center[1] + R * sin_phi * sin_t
+        z = self.center[2] + R * cos_phi
+        pts = jnp.column_stack([x, y, z])
+
+        # Единичная радиальная нормаль (наружу для 'outer', внутрь для 'inner')
+        nx = sin_phi * cos_t
+        ny = sin_phi * sin_t
+        nz = cos_phi
+        norms = sign * jnp.column_stack([nx, ny, nz])
+
+        return pts, norms
+
+    def sample_boundary_by_name(self, n_points_dict: Dict[str, int],
+                                method="random", rng=None):
+        result = {}
+        keys = jax.random.split(rng, 2) if method == "random" and rng is not None else [None] * 2
+        for i, name in enumerate(self.get_boundary_names()):
+            n = n_points_dict.get(name, 0)
+            if n > 0:
+                pts, norms = self._generate_boundary_points(name, n, method, keys[i])
+                result[name] = (pts, norms)
+        return result
+
+    # ------------------------------------------------------------ sample_boundary
 
     def sample_boundary(
         self, n_points: int, rng: jax.Array | None = None, tags: list | None = None
@@ -1404,88 +1459,49 @@ class HollowSphere3D(GeometryBase):
 
         # Внешняя сфера
         if tags is None or "outer" in tags:
-            u = jax.random.uniform(keys[0], (n_per_surface,))
-            v = jax.random.uniform(keys[1], (n_per_surface,))
-
-            theta = 2 * jnp.pi * u
-            phi = jnp.arccos(2 * v - 1)
-
-            x = self.center[0] + self.R_outer * jnp.sin(phi) * jnp.cos(theta)
-            y = self.center[1] + self.R_outer * jnp.sin(phi) * jnp.sin(theta)
-            z = self.center[2] + self.R_outer * jnp.cos(phi)
-
-            points_list.append(jnp.column_stack([x, y, z]))
-            normals_list.append(
-                jnp.column_stack(
-                    [
-                        jnp.sin(phi) * jnp.cos(theta),
-                        jnp.sin(phi) * jnp.sin(theta),
-                        jnp.cos(phi),
-                    ]
-                )
-            )
+            pts, norms = self._generate_boundary_points('outer', n_per_surface, rng=keys[0])
+            points_list.append(pts)
+            normals_list.append(norms)
 
         # Внутренняя сфера
         if tags is None or "inner" in tags:
-            u = jax.random.uniform(keys[0], (n_per_surface,))
-            v = jax.random.uniform(keys[1], (n_per_surface,))
-
-            theta = 2 * jnp.pi * u
-            phi = jnp.arccos(2 * v - 1)
-
-            x = self.center[0] + self.R_inner * jnp.sin(phi) * jnp.cos(theta)
-            y = self.center[1] + self.R_inner * jnp.sin(phi) * jnp.sin(theta)
-            z = self.center[2] + self.R_inner * jnp.cos(phi)
-
-            points_list.append(jnp.column_stack([x, y, z]))
-            # Нормаль направлена внутрь (наружу из материала)
-            normals_list.append(
-                -jnp.column_stack(
-                    [
-                        jnp.sin(phi) * jnp.cos(theta),
-                        jnp.sin(phi) * jnp.sin(theta),
-                        jnp.cos(phi),
-                    ]
-                )
-            )
+            pts, norms = self._generate_boundary_points('inner', n_per_surface, rng=keys[1])
+            points_list.append(pts)
+            normals_list.append(norms)
 
         return jnp.vstack(points_list), jnp.vstack(normals_list)
+
+    # ------------------------------------------------------------ is_inside
 
     def is_inside(self, points: jnp.ndarray) -> jnp.ndarray:
         r = jnp.linalg.norm(points - self.center, axis=1)
         return (r <= self.R_outer) & (r >= self.R_inner)
-        
-    # ===== НОВЫЕ МЕТОДЫ =====
-    def get_boundary_names(self) -> List[str]:
-        return ['outer', 'inner']
 
-    def _generate_boundary_points(self, name: str, n: int, method="random", rng=None) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        # Реализуйте генерацию для внешней и внутренней сфер
-        raise NotImplementedError
-
-    def sample_boundary_by_name(self, n_points_dict: Dict[str, int], method="random", rng=None) -> Dict[str, Tuple[jnp.ndarray, jnp.ndarray]]:
-        result = {}
-        for name, n in n_points_dict.items():
-            if n > 0:
-                pts, norms = self._generate_boundary_points(name, n, method, rng)
-                result[name] = (pts, norms)
-        return result
+    # ------------------------------------------------------------ interface
 
     def sample_interface(self, other_geom: 'GeometryBase', n_points: int,
                          self_interface_name: str, other_interface_name: str,
-                         method="random", rng=None) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+                         method="random", rng=None):
         if not isinstance(other_geom, HollowSphere3D):
             raise TypeError("other_geom must be HollowSphere3D")
-        pts, normals_self = self._generate_boundary_points(self_interface_name, n_points, method, rng)
+        pts, normals_self = self._generate_boundary_points(
+            self_interface_name, n_points, method, rng)
         normals_other = -normals_self
-        other_pts, _ = other_geom._generate_boundary_points(other_interface_name, n_points, method, rng)
+        other_pts, _ = other_geom._generate_boundary_points(
+            other_interface_name, n_points, method, rng)
         if not jnp.allclose(pts, other_pts):
-            raise ValueError(f"Interface points do not match: self.{self_interface_name} vs other.{other_interface_name}")
+            raise ValueError(
+                f"Interface points do not match: "
+                f"self.{self_interface_name} vs other.{other_interface_name}"
+            )
         return pts, normals_self, normals_other
+
+    # ------------------------------------------------------------ bounds
 
     @property
     def bounds(self) -> tuple[jnp.ndarray, jnp.ndarray]:
-        min_corner = self.center - self.R_outer
-        max_corner = self.center + self.R_outer
+        R = self.R_outer
+        min_corner = self.center - R
+        max_corner = self.center + R
         return min_corner, max_corner
     

@@ -6,30 +6,23 @@
 from __future__ import annotations
 
 import time
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import optax
-from functools import partial
 from flax import nnx
+
 from mpinn.config import normalize_coords, denormalize_temp
+
 
 class FCNet(nnx.Module):
     """Полносвязная нейронная сеть для PINN."""
 
-    def __init__(
-        self,
-        din: int,
-        dmid: int,
-        dout: int,
-        num_layers: int,
-        activation,
-        rngs: nnx.Rngs,
-    ):
+    def __init__(self, din, dmid, dout, num_layers, activation, rngs):
         self.layers = nnx.List(
-            [
-                nnx.Linear(din if i == 0 else dmid, dmid, rngs=rngs)
-                for i in range(num_layers)
-            ]
+            [nnx.Linear(din if i == 0 else dmid, dmid, rngs=rngs)
+             for i in range(num_layers)]
         )
         self.linear_out = nnx.Linear(dmid, dout, rngs=rngs)
         self.num_layers = num_layers
@@ -40,6 +33,7 @@ class FCNet(nnx.Module):
             x = layer(x)
             x = self.activation(x)
         return self.linear_out(x)
+
 
 class ScaledNet(nnx.Module):
     """Обёртка: нормализует вход, денормализует выход (T = T_norm * T_max)."""
@@ -56,30 +50,53 @@ class ScaledNet(nnx.Module):
 
 
 class PINN:
-    """Физически-информированная нейронная сеть (Функциональный JAX + Optax)."""
+    """Физически-информированная нейронная сеть (функциональный JAX + Optax)."""
 
-    def __init__(self, net, opt, weights, pde_fn, bc_configs):
-        # Разделяем модель на граф (структуру) и параметры (веса)
+    def __init__(self, net, opt, weights, pde_fn, bc_configs,
+                 lam, source_fn=0.0):
+        """
+        Parameters
+        ----------
+        net : nnx.Module
+        opt : optax.GradientTransformation
+        weights : tuple[float, float]
+            (w_pde, w_bc)
+        pde_fn : Callable
+            Сырая PDE-функция вида fn(model, x, lam, source_fn) -> residuals.
+            Например, `laplace_2d`, `line_1d`, `polar_2d`.
+        bc_configs : list[dict]
+        lam : float | Callable[[jax.Array], jax.Array]
+            Теплопроводность: константа или функция от T.
+        source_fn : float | Callable, optional
+            Источник: скаляр (обычно 0.0) или функция от x.
+        """
         self.graphdef, self.params = nnx.split(net)
-        
-        # Инициализируем optax оптимизатор и его состояние
-        self.tx = opt  # Это должен быть optax.GradientTransformation
+
+        self.tx = opt
         self.opt_state = self.tx.init(self.params)
-        
+
         self.weights = weights
         self.pde_fn = pde_fn
         self.bc_configs = bc_configs
+        self.lam = lam
+        self.source_fn = source_fn
+        self.loss_fn = self.create_loss_fn()
+
+    def set_lam(self, new_lam):
+        """Меняет теплопроводность и пересоздаёт loss_fn."""
+        self.lam = new_lam
         self.loss_fn = self.create_loss_fn()
 
     def create_loss_fn(self):
-        # Захватываем контекст в замыкание
         pde_fn = self.pde_fn
         bc_configs = self.bc_configs
         weights = self.weights
+        lam = self.lam
+        source_fn = self.source_fn
 
         def total_loss(model, x_collocation):
-            residuals_pde = pde_fn(model, x_collocation)
-            loss_pde = jnp.mean(residuals_pde ** 2) 
+            residuals_pde = pde_fn(model, x_collocation, lam, source_fn)
+            loss_pde = jnp.mean(residuals_pde ** 2)
 
             loss_bcs = []
             for bc in bc_configs:
@@ -104,19 +121,14 @@ class PINN:
     @partial(jax.jit, static_argnames=['self', 'graphdef', 'tx', 'loss_fn'])
     def train_step(self, params, graphdef, x_collocation, tx, opt_state, loss_fn):
         def closure(p):
-            # Собираем модель обратно из графа и параметров
             model = nnx.merge(graphdef, p)
             return loss_fn(model, x_collocation)
-            
-        # Считаем градиенты
+
         (total_loss, aux_losses), grads = jax.value_and_grad(closure, has_aux=True)(params)
-        
-        # Обновляем состояние оптимизатора (в новых optax нужно передавать params)
+
         updates, new_opt_state = tx.update(grads, opt_state, params)
-        
-        # Применяем обновления к весам
         new_params = optax.apply_updates(params, updates)
-        
+
         return new_params, new_opt_state, total_loss, aux_losses
 
     def train_loop(self, x_collocation, num_steps, log_interval=100, print_log=False):
@@ -129,20 +141,19 @@ class PINN:
             history[name] = []
 
         curr_params, curr_opt_state = self.params, self.opt_state
-        
+
         for step in range(num_steps):
-            # Явно передаем params и opt_state
             curr_params, curr_opt_state, total_loss, aux_losses = self.train_step(
-                curr_params, self.graphdef, x_collocation, self.tx, curr_opt_state, loss_fn
+                curr_params, self.graphdef, x_collocation, self.tx,
+                curr_opt_state, loss_fn
             )
-            
+
             if step % log_interval == 0 or step == num_steps - 1:
                 pde_val = float(aux_losses[0])
                 bc_vals = [float(v) for v in aux_losses[1:]]
                 bc_total = float(sum(bc_vals)) if bc_vals else 0.0
                 total_val = float(total_loss)
 
-                # ---------- запись в историю ----------
                 history["total_loss"].append(total_val)
                 history["pde"].append(pde_val)
                 history["bc_total"].append(bc_total)
@@ -157,10 +168,8 @@ class PINN:
                     )
                     for i, v in enumerate(bc_vals):
                         line += f" | BC_{i}: {v:.3e}"
-                    # добиваем пробелами, чтобы стереть хвост старой строки
                     print(line.ljust(120))
-                    
-        # Сохраняем финальное состояние
+
         self.params = curr_params
         self.opt_state = curr_opt_state
         return history
@@ -172,13 +181,12 @@ class PINN:
         return history, end_time - start_time
 
     def predict(self, x_test):
-        # Собираем модель для инференса
         model = nnx.merge(self.graphdef, self.params)
         return model(x_test)
 
     def compute_metrics(self, x_test, T_pred, T_exact):
         diff = T_pred - T_exact
-        mse = float(jnp.mean(diff**2))
+        mse = float(jnp.mean(diff ** 2))
         mae = float(jnp.mean(jnp.abs(diff)))
         rmse = float(jnp.sqrt(mse))
         max_error = float(jnp.max(jnp.abs(diff)))
@@ -193,7 +201,7 @@ class PINN:
 
     def evaluate(self, x_test, exact_fn, bc_info=None):
         T_pred = self.predict(x_test).ravel()
-        T_exact = exact_fn(x_test.ravel())
+        T_exact = exact_fn(x_test).ravel()
         metrics = self.compute_metrics(x_test, T_pred, T_exact)
         if bc_info is not None:
             for name, bc_type in bc_info.items():
@@ -205,14 +213,6 @@ class PINN:
         return jax.tree.map(jnp.copy, self.params)
 
     def _make_rl2_evaluator(self, x_test, exact_fn):
-        """
-        Фабрика JIT-компилируемой функции оценки RL2.
-
-        JAX кэширует компиляцию по object id функции, переданной в jit.
-        Если создавать @jax.jit внутри цикла — каждый вызов порождает
-        новый объект функции и новую компиляцию. Поэтому функцию нужно
-        создать один раз за цикл и переиспользовать.
-        """
         graphdef = self.graphdef
 
         @jax.jit
@@ -227,12 +227,6 @@ class PINN:
         return _rl2
 
     def _make_unweighted_loss_evaluator(self, x_collocation):
-        """
-        Фабрика JIT-компилируемой функции невзвешенного лосса.
-
-        Считает pde + сумму всех bc без учёта config.weights: веса
-        могут искажать ранжирование чекпоинтов между собой.
-        """
         graphdef = self.graphdef
         loss_fn = self.loss_fn
 
@@ -255,18 +249,6 @@ class PINN:
         max_epochs: int = 5000,
         log_interval: int = 100,
     ):
-        """
-        Обучает блоками по block_epochs эпох до достижения целевого RL2.
-
-        После каждого блока считается RL2 на тестовых точках; параметры
-        лучшей эпохи сохраняются. Обучение завершается при достижении
-        target_rl2 либо при исчерпании max_epochs. По завершении
-        восстанавливаются параметры лучшей эпохи.
-
-        Примечание: opt_state не откатывается вместе с params — метод
-        предназначен для получения финальной модели, а не для
-        продолжения обучения с чекпоинта.
-        """
         start_time = time.perf_counter()
 
         rl2_fn = self._make_rl2_evaluator(x_test, exact_fn)
@@ -301,18 +283,6 @@ class PINN:
         log_interval: int = 100,
         checkpoint_every: int = 50,
     ):
-        """
-        Обучает ровно epochs эпох.
-
-        Каждые checkpoint_every эпох сравнивает невзвешенную сумму
-        pde + bc (без учёта config.weights — они могут искажать
-        ранжирование чекпоинтов) и сохраняет параметры лучшей модели.
-        По завершении восстанавливает параметры лучшего чекпоинта.
-
-        Примечание: критерий чекпоинта (невзвешенный лосс) может
-        отличаться от критерия обучения (взвешенный лосс). Если это
-        критично — согласуйте веса или используйте fit_adaptive.
-        """
         start_time = time.perf_counter()
 
         loss_fn = self._make_unweighted_loss_evaluator(x_collocation)

@@ -19,6 +19,7 @@ from flax import nnx
 from mpinn.config import TrainConfig, get_activation, get_optimizer
 from mpinn.geom import GeometryBase
 from mpinn.pinn_core import PINN, FCNet, ScaledNet
+from mpinn.config import save_results_to_csv
 
 
 def generate_test_points(geom: GeometryBase, n_points: int) -> jnp.ndarray:
@@ -58,10 +59,12 @@ def compute_rl2(T_pred, T_exact, eps: float = 1e-12) -> float:
 def run_experiment(
     config: TrainConfig,
     geom: GeometryBase,
-    pde_fn: Callable,                    # уже с замкнутыми lam и source_fn
-    exact_fn: Callable,                  # уже с замкнутыми параметрами (фабрика из analytic.py)
+    pde_fn: Callable,
+    exact_fn: Callable,
     bc_configs: List[Dict],
     T_max: float,
+    lam,                                  # ← добавить
+    source_fn: float | Callable = 0.0,    # ← опционально
     bc_info: Optional[Dict] = None,
     geometry_type: Optional[str] = None,
     x_test: Optional[jnp.ndarray] = None,
@@ -102,6 +105,8 @@ def run_experiment(
         tuple(config.weights),
         pde_fn,
         bc_configs,
+        lam=lam,
+        source_fn=source_fn
     )
 
     # ---------- 4. Функция оценки ----------
@@ -270,12 +275,7 @@ def run_grid_search(
             jax.clear_caches()
 
     if results:
-        df = pd.DataFrame(results)
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-        header = not os.path.exists(csv_path)
-        df.to_csv(csv_path, mode="a", header=header, index=False)
-        print(f"Результаты сохранены в {csv_path}")
-        return df
+        return save_results_to_csv(results, csv_path, append=True)
     else:
         print("Нет результатов.")
         return pd.DataFrame()

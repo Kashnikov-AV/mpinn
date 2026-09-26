@@ -1,85 +1,83 @@
 ﻿"""
-Реализация мультидоменной ФИНС (MPINN) с поддержкой различных физических параметров для каждого домена.
+MPINN: мультидоменная физически-информированная нейронная сеть.
+
+Архитектура: координатор (MPINN) управляет списком независимых экземпляров PINN.
+Каждый PINN инкапсулирует свою сеть, оптимизатор, физику и граничные условия.
+Обучение совместное (один train_step), обновление параметров раздельное.
 """
 
 import time
-from typing import List, Tuple, Dict, Any, Callable, Optional
 import jax
 import jax.numpy as jnp
 import optax
 from flax import nnx
 from functools import partial
-import matplotlib.pyplot as plt
-
-from .geom import GeometryBase
-from .pinn_core import PINN, FCNet
-from .config import PhysicsParams
+from .pinn_core import PINN
 
 
 class MPINN:
-    """
-    Мультидоменная физически информированная нейронная сеть.
-    """
-
     def __init__(
         self,
-        domain_configs: List[Dict[str, Any]],
-        interface_pairs: List[Tuple[int, str, int, str]],  # (idx1, name1, idx2, name2)
+        domain_configs: list[dict],
+        interface_pairs: list[tuple],        # [(idx1, name1, idx2, name2), ...]
         n_interface_points: int,
         interface_weight: float = 1.0,
-        rng: Optional[jax.Array] = None,
+        rng: jax.Array | None = None,
     ):
         """
+        Инициализация MPINN.
+
         Args:
-            domain_configs: список конфигураций доменов. Каждая конфигурация:
+            domain_configs: Список конфигураций доменов. Каждая конфигурация:
                 {
-                    'geom': GeometryBase,
-                    'phys': PhysicsParams,          # физические параметры домена
-                    'pde_fn': Callable,             # функция PDE (model, x, phys) -> скаляр
-                    'bc_configs': List[Dict],       # список ГУ (как в PINN)
-                    'net': nnx.Module,              # нейросеть домена (уже обёрнута в ScaledNet)
-                    'opt': optax.GradientTransformation,
-                    'n_points': int,                # количество коллокационных точек
-                    'weights': Tuple[float, float]  # (weight_pde, weight_bc)
+                    'geom':       GeometryBase,           # Геометрия домена
+                    'net':        nnx.Module,             # Сеть домена
+                    'opt':        optax.GradientTransformation,
+                    'pde_fn':     Callable,
+                    'bc_configs': list[dict],             # ГУ на ВНЕШНИХ границах
+                    'n_points':   int,                    # Точек коллокации
+                    'weights':    tuple[float, float],    # (w_pde, w_bc)
+                    'lam':        float = 1.0,            # Теплопроводность для интерфейса
                 }
-            interface_pairs: список кортежей (idx1, name1, idx2, name2),
-                где idx1, idx2 — индексы доменов, name1, name2 — имена граней (например, 'right', 'left').
-            n_interface_points: количество точек на каждом интерфейсе.
-            interface_weight: вес потерь на интерфейсах.
-            rng: ключ JAX.
+            interface_pairs: Список кортежей (idx1, name1, idx2, name2).
+            n_interface_points: Количество точек на каждом интерфейсе.
+            interface_weight: Вес потерь на интерфейсах.
+            rng: Ключ JAX.
         """
         self.n_domains = len(domain_configs)
         self.domain_configs = domain_configs
-        self.interface_weight = interface_weight
         self.interface_pairs = interface_pairs
+        self.interface_weight = interface_weight
 
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
-        # Генерация коллокационных точек для каждого домена
-        self.x_collocation = []
-        for cfg in domain_configs:
-            pts = cfg['geom'].sample_interior(cfg['n_points'], rng=rng)
-            self.x_collocation.append(pts)
+        # --- 1. Список PINN, по одному на домен ---
+        # Каждый PINN инкапсулирует свои graphdef, params, tx, opt_state, loss_fn
+        self.pinns = [
+            PINN(
+                net=cfg['net'],
+                opt=cfg['opt'],
+                weights=cfg['weights'],
+                pde_fn=cfg['pde_fn'],
+                bc_configs=cfg['bc_configs'],
+                lam=cfg['lam'],
+                source_fn=cfg.get('source_fn', 0.0),
+            )
+            for cfg in domain_configs
+        ]
 
-        # Разделение сетей на граф и параметры
-        self.graphdefs = []
-        self.params = []
-        self.txs = []
-        self.opt_states = []
+        # --- 2. Точки коллокации ---
+        col_keys = jax.random.split(rng, self.n_domains)
+        self.x_collocation = tuple(
+            cfg['geom'].sample_interior(cfg['n_points'], rng=k)
+            for cfg, k in zip(domain_configs, col_keys)
+        )
 
-        for cfg in domain_configs:
-            net = cfg['net']
-            g, p = nnx.split(net)
-            self.graphdefs.append(g)
-            self.params.append(p)
-            tx = cfg['opt']
-            self.txs.append(tx)
-            self.opt_states.append(tx.init(p))
-
-        # Генерация точек интерфейсов с использованием geom.sample_interface
-        self.interface_data = []  # список кортежей (points, normals_self, normals_other)
-        for idx1, name1, idx2, name2 in interface_pairs:
+        # --- 3. Интерфейсные точки ---
+        itf_keys = jax.random.split(rng, len(interface_pairs))
+        self.interface_data = []            # (pts, n1, n2, idx1, idx2)
+        for (idx1, name1, idx2, name2), k in zip(interface_pairs, itf_keys):
             geom1 = domain_configs[idx1]['geom']
             geom2 = domain_configs[idx2]['geom']
             pts, n1, n2 = geom1.sample_interface(
@@ -87,224 +85,190 @@ class MPINN:
                 n_points=n_interface_points,
                 self_interface_name=name1,
                 other_interface_name=name2,
-                rng=rng
+                rng=k,
             )
-            self.interface_data.append((pts, n1, n2))
+            self.interface_data.append((pts, n1, n2, idx1, idx2))
 
-        # Для predict храним границы доменов
-        self.boundaries = [(cfg['geom'].x0, cfg['geom'].x1) for cfg in domain_configs]
+        # --- 4. lambda по доменам (для потока на интерфейсе) ---
+        self.lambdas = tuple(cfg.get('lam', 1.0) for cfg in domain_configs)
+
+        # --- 5. Общий loss_fn создаётся один раз ---
+        self.loss_fn = self.create_loss_fn()
+
+    # ------------------------------------------------------------------ loss
 
     def create_loss_fn(self):
-        """Создаёт функцию потерь для многодоменной задачи."""
-        def total_loss(params_tuple):
-            # Собираем модели
-            models = [nnx.merge(g, p) for g, p in zip(self.graphdefs, params_tuple)]
+        """Собирает общий лосс: PDE + BC всех доменов + интерфейсные условия."""
+        pinns = self.pinns
+        x_collocs = self.x_collocation
+        itf_data = self.interface_data
+        lambdas = self.lambdas
+        itf_w = self.interface_weight
 
+        def total_loss(params_tuple):
+            # params_tuple[i] — params i-го PINN
+            models = tuple(
+                nnx.merge(p.graphdef, p_params)
+                for p, p_params in zip(pinns, params_tuple)
+            )
+
+            # --- PDE + BC по доменам через PINN.loss_fn ---
             domain_losses = []
             pde_losses = []
             bc_losses = []
+            for pinn, model, x_d in zip(pinns, models, x_collocs):
+                d_loss, aux = pinn.loss_fn(model, x_d)     # (total, (pde, *bcs))
+                domain_losses.append(d_loss)
+                pde_losses.append(aux[0])
+                bc_losses.append(sum(aux[1:]) if len(aux) > 1 else 0.0)
 
-            # Потери PDE и BC для каждого домена
-            for i, (model, cfg, x_d) in enumerate(zip(models, self.domain_configs, self.x_collocation)):
-                phys = cfg['phys']  # каждый домен имеет свой PhysicsParams
-                # PDE loss
-                pde_fn = cfg['pde_fn']
-                loss_pde = pde_fn(model, x_d, phys)  # pde_fn возвращает скаляр (MSE)
-
-                # BC losses
-                loss_bc = 0.0
-                for bc in cfg['bc_configs']:
-                    fn = bc['fn']
-                    points = bc['points']
-                    params_bc = bc.get('params', {})
-                    normals = bc.get('normals')
-                    if normals is not None:
-                        residuals = fn(model, points, normals, **params_bc)
-                    else:
-                        residuals = fn(model, points, **params_bc)
-                    loss_bc += jnp.mean(residuals ** 2)
-
-                # Взвешенная сумма
-                w_pde, w_bc = cfg.get('weights', (1.0, 1.0))
-                domain_loss = w_pde * loss_pde + w_bc * loss_bc
-                domain_losses.append(domain_loss)
-                pde_losses.append(loss_pde)
-                bc_losses.append(loss_bc)
-
-            # Потери на интерфейсах
+            # --- Интерфейсные лоссы ---
             interface_losses = []
-            for (pts, normals_self, normals_other), (idx1, name1, idx2, name2) in zip(
-                self.interface_data, self.interface_pairs
-            ):
-                m1 = models[idx1]
-                m2 = models[idx2]
-                lam1 = self.domain_configs[idx1]['phys']._lambda
-                lam2 = self.domain_configs[idx2]['phys']._lambda
+            for pts, n1, n2, idx1, idx2 in itf_data:
+                m1, m2 = models[idx1], models[idx2]
+                lam1, lam2 = lambdas[idx1], lambdas[idx2]
 
-                # Значения на интерфейсе
+                # Непрерывность T
                 T1 = m1(pts).ravel()
                 T2 = m2(pts).ravel()
                 cont_T = jnp.mean((T1 - T2) ** 2)
 
-                # Производные по направлению нормали
-                def grad_fn(model, pts, normals):
-                    def predict_single(x):
+                # Непрерывность потока: lambda1*∂T1/∂n1 + lambda2*∂T2/∂n2 = 0
+                def grad_normal(model, points, normals):
+                    def predict_one(x):
                         return model(x.reshape(1, -1)).ravel()[0]
-                    grad_fn_single = jax.grad(predict_single)
-                    grads = jax.vmap(grad_fn_single)(pts)
-                    return jnp.sum(grads * normals, axis=1)
+                    g = jax.vmap(jax.grad(predict_one))(points)
+                    return jnp.sum(g * normals, axis=1)
 
-                dT1n = grad_fn(m1, pts, normals_self)
-                dT2n = grad_fn(m2, pts, normals_other)
-                cont_flux = jnp.mean((lam1 * dT1n - lam2 * dT2n) ** 2)
+                dT1n = grad_normal(m1, pts, n1)
+                dT2n = grad_normal(m2, pts, n2)
+                cont_flux = jnp.mean((lam1 * dT1n + lam2 * dT2n) ** 2)
 
-                interface_loss = cont_T + cont_flux
-                interface_losses.append(interface_loss)
+                interface_losses.append(cont_T + cont_flux)
 
-            # Суммируем
-            total_domain = sum(domain_losses)
-            total_interface = self.interface_weight * sum(interface_losses)
-            total = total_domain + total_interface
+            total = sum(domain_losses) + itf_w * sum(interface_losses)
 
-            # Вспомогательные значения для логирования
-            aux = (*domain_losses, *interface_losses, *pde_losses, *bc_losses)
-            return total, aux
+            aux_out = (
+                *domain_losses,
+                *interface_losses,
+                *pde_losses,
+                *bc_losses,
+            )
+            return total, aux_out
 
         return total_loss
 
-    @partial(jax.jit, static_argnames=['self'])
-    def train_step(self, params_tuple, loss_fn):
-        def closure(p):
-            return loss_fn(p)
+    # --------------------------------------------------------------- training
 
-        (total, aux), grads = jax.value_and_grad(closure, has_aux=True)(params_tuple)
+    @partial(jax.jit, static_argnames=['self', 'loss_fn'])
+    def train_step(self, params_list, opt_states, loss_fn):
+        """
+        Один шаг обучения.
+        params_list — кортеж params (по одному на PINN)
+        opt_states — кортеж opt_state (по одному на PINN)
+        """
+        def closure(pl):
+            return loss_fn(pl)
+
+        (total, aux), grads_list = jax.value_and_grad(closure, has_aux=True)(params_list)
 
         new_params = []
         new_opt_states = []
-        for p, g, tx, os in zip(params_tuple, grads, self.txs, self.opt_states):
+        for p, g, tx, os in zip(params_list, grads_list, self.txs, opt_states):
             updates, new_os = tx.update(g, os)
             new_params.append(optax.apply_updates(p, updates))
             new_opt_states.append(new_os)
 
         return tuple(new_params), tuple(new_opt_states), total, aux
 
+    @property
+    def txs(self):
+        """Оптимизаторы всех PINN."""
+        return tuple(p.tx for p in self.pinns)
+
+    @property
+    def params(self):
+        """Текущие params всех PINN."""
+        return tuple(p.params for p in self.pinns)
+
+    @property
+    def opt_states(self):
+        return tuple(p.opt_state for p in self.pinns)
+
     def fit(self, epochs: int = 1000, log_interval: int = 100):
-        """Обучение модели MPINN."""
-        loss_fn = self.create_loss_fn()
-        n_interfaces = len(self.interface_pairs)
+        loss_fn = self.loss_fn
+        n_itf = len(self.interface_data)
         loss_names = (
-            *[f"domain_{i}" for i in range(self.n_domains)],
-            *[f"interface_{i}" for i in range(n_interfaces)],
-            *[f"pde_{i}" for i in range(self.n_domains)],
-            *[f"bc_{i}" for i in range(self.n_domains)],
+            *[f"domain_{i}"    for i in range(self.n_domains)],
+            *[f"interface_{i}" for i in range(n_itf)],
+            *[f"pde_{i}"       for i in range(self.n_domains)],
+            *[f"bc_{i}"        for i in range(self.n_domains)],
         )
 
-        history = {"steps": [], "total_loss": []}
+        history = {"total_loss": []}
         for name in loss_names:
             history[name] = []
 
         curr_params = self.params
         curr_opt_states = self.opt_states
 
-        start_time = time.perf_counter()
+        t0 = time.perf_counter()
         for step in range(epochs):
             curr_params, curr_opt_states, total, aux = self.train_step(
-                curr_params, loss_fn
+                curr_params, curr_opt_states, loss_fn
             )
             if step % log_interval == 0 or step == epochs - 1:
                 history["total_loss"].append(float(total))
                 for name, val in zip(loss_names, aux):
                     history[name].append(float(val))
 
-        self.params = curr_params
-        self.opt_states = curr_opt_states
-        end_time = time.perf_counter()
+        # --- Записываем params/opt_state обратно в PINN ---
+        for pinn, p, os in zip(self.pinns, curr_params, curr_opt_states):
+            pinn.params = p
+            pinn.opt_state = os
 
-        return history, end_time - start_time
+        return history, time.perf_counter() - t0
+
+    # --------------------------------------------------------------- predict
 
     def predict(self, x_test):
-        models = [nnx.merge(g, p) for g, p in zip(self.graphdefs, self.params)]
-        x_flat = jnp.atleast_1d(x_test.ravel())
-        t_pred = jnp.zeros_like(x_flat)
+        """Предсказание по всем доменам с учетом их геометрии (1D/2D/3D)."""
+        x_flat = jnp.atleast_1d(x_test)
+        dim = self.domain_configs[0]['geom'].dim
+        if x_flat.ndim == 1:
+            x_flat = x_flat.reshape(-1, dim)
 
-        for i, (b0, b1) in enumerate(self.boundaries):
-            if i == self.n_domains - 1:
-                mask = (x_flat >= b0) & (x_flat <= b1)
+        t_pred = jnp.full((x_flat.shape[0],), jnp.nan)
+
+        for i, pinn in enumerate(self.pinns):
+            geom = self.domain_configs[i]['geom']
+            model = nnx.merge(pinn.graphdef, pinn.params)
+
+            if hasattr(geom, 'is_inside'):
+                mask = geom.is_inside(x_flat)
             else:
-                mask = (x_flat >= b0) & (x_flat < b1)
+                bmin, bmax = geom.bounds
+                mask = jnp.all((x_flat >= bmin) & (x_flat <= bmax), axis=1)
+
+            # Не перезаписываем точки, уже отнесенные к другим доменам
+            already = ~jnp.isnan(t_pred)
+            mask = mask & (~already)
+
             if jnp.any(mask):
-                x_dom = x_flat[mask].reshape(-1, 1)
-                t_pred = t_pred.at[mask].set(models[i](x_dom).ravel())
+                preds = model(x_flat[mask]).ravel()
+                t_pred = t_pred.at[mask].set(preds)
+
         return t_pred.reshape(-1, 1)
 
-    def compute_metrics(self, x_test, t_pred, t_exact):
-        diff = t_pred - t_exact
-        mse = float(jnp.mean(diff**2))
-        mae = float(jnp.mean(jnp.abs(diff)))
-        rmse = float(jnp.sqrt(mse))
-        max_error = float(jnp.max(jnp.abs(diff)))
-        mape = float(jnp.mean(jnp.abs(diff / (jnp.abs(t_exact) + 1e-8))))
-        return {
-            "mape": f"{mape:.4e}",
-            "mae": f"{mae:.4e}",
-            "mse": f"{mse:.4e}",
-            "rmse": f"{rmse:.4e}",
-            "max_error": f"{max_error:.4e}",
-        }
+    # --------------------------------------------------------------- helpers
 
-    def evaluate(self, x_test, exact_fn, phys=None, bc_info=None):
+    def evaluate(self, x_test, exact_fn):
         t_pred = self.predict(x_test).ravel()
-        # Если exact_fn требует phys, но у нас разные phys для доменов, то нужно передавать что-то одно.
-        # Для простоты предполагаем, что exact_fn может работать с любым phys (например, использует только координаты).
-        # Если нужен phys конкретного домена, можно передать phys первого домена или объединить.
-        # Здесь мы оставляем возможность передать phys в evaluate.
-        t_exact = exact_fn(x_test.ravel(), phys)
-        metrics = self.compute_metrics(x_test, t_pred, t_exact)
-        if bc_info:
-            for name, bc_type in bc_info.items():
-                metrics[f"bc_{name}"] = bc_type
-        return metrics, t_pred, t_exact
-
-    def show_plot(self, x_test, t_pred, t_exact, title="Сравнение MPINN и точного решения"):
-        _fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(x_test.ravel(), t_exact, "b-", label="Аналитическое решение", linewidth=2)
-        ax.plot(x_test.ravel(), t_pred, "r:", label="ФИНС", linewidth=6)
-        # Отмечаем интерфейсы
-        for idx1, name1, idx2, name2 in self.interface_pairs:
-            geom1 = self.domain_configs[idx1]['geom']
-            if hasattr(geom1, 'x0') and hasattr(geom1, 'x1'):
-                if name1 == 'right':
-                    x_int = geom1.x1
-                elif name1 == 'left':
-                    x_int = geom1.x0
-                else:
-                    continue
-                ax.axvline(x=x_int, color="gray", linestyle=":", alpha=0.5)
-        ax.set_xlabel("x, м")
-        ax.set_ylabel("T, К")
-        ax.legend(fontsize=14)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.show()
-
-    def save_plot(self, x_test, t_pred, t_exact, save_path, title="Сравнение MPINN и точного решения"):
-        _fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(x_test.ravel(), t_exact, "b-", label="Аналитическое решение", linewidth=2)
-        ax.plot(x_test.ravel(), t_pred, "r:", label="ФИНС", linewidth=6)
-        for idx1, name1, idx2, name2 in self.interface_pairs:
-            geom1 = self.domain_configs[idx1]['geom']
-            if hasattr(geom1, 'x0') and hasattr(geom1, 'x1'):
-                if name1 == 'right':
-                    x_int = geom1.x1
-                elif name1 == 'left':
-                    x_int = geom1.x0
-                else:
-                    continue
-                ax.axvline(x=x_int, color="gray", linestyle=":", alpha=0.5)
-        ax.set_xlabel("x, м")
-        ax.set_ylabel("T, К")
-        ax.legend(fontsize=14)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=72, bbox_inches="tight")
-        plt.close()
+        t_exact = exact_fn(x_test).ravel()
+        diff = t_pred - t_exact
+        return {
+            "mse":  float(jnp.mean(diff ** 2)),
+            "mae":  float(jnp.mean(jnp.abs(diff))),
+            "rmse": float(jnp.sqrt(jnp.mean(diff ** 2))),
+            "max":  float(jnp.max(jnp.abs(diff))),
+        }, t_pred, t_exact

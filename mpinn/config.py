@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 import jax.numpy as jnp
 import optax
 from flax import nnx
+import os
+import pandas as pd
 
 
 @dataclass
@@ -24,6 +26,7 @@ class TrainConfig:
     log_interval: int = 100
     weights: tuple[float, float] = (1.0, 1.0)
 
+
 def get_activation(name: str):
     """Фабрика функций активации."""
     mapping = {
@@ -35,6 +38,7 @@ def get_activation(name: str):
         "Sigmoid": nnx.sigmoid,
     }
     return mapping.get(name, nnx.relu)
+
 
 def get_optimizer(name: str, lr: float):
     """Фабрика оптимизаторов."""
@@ -49,17 +53,44 @@ def get_optimizer(name: str, lr: float):
         return optax.rmsprop(lr)
     raise ValueError(f"Неизвестный оптимизатор: {name}.")
 
+
 def normalize_coords(coords, x_min, x_max):
     rng = x_max - x_min + (x_max == x_min) * 1e-8
     return (coords - x_min) / rng
+
 
 def normalize_temp(temps, t_max=None):
     if t_max is None:
         t_max = temps.max()
     return temps / (t_max + (t_max == 0) * 1e-8)
 
+
 def denormalize_coords(coords, x_min, x_max):
     return coords * (x_max - x_min) + x_min
 
+
 def denormalize_temp(temp, t_max):
     return temp * t_max
+
+
+def save_results_to_csv(results, csv_path, append=True):
+    if isinstance(results, pd.DataFrame):
+        df = results.copy()
+    elif isinstance(results, dict):
+        df = pd.DataFrame([results])
+    elif isinstance(results, list):
+        if not results:
+            return pd.DataFrame()
+        df = pd.DataFrame(results)
+    else:
+        raise TypeError(f"Неподдерживаемый тип: {type(results)}")
+
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+
+    if append and os.path.exists(csv_path):
+        df.to_csv(csv_path, mode="a", header=False, index=False)
+    else:
+        df.to_csv(csv_path, mode="w", header=True, index=False)
+
+    print(f"Сохранено: {csv_path} ({len(df)} строк)")
+    return df

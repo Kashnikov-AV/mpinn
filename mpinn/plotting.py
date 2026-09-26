@@ -111,6 +111,78 @@ def show_history(
     else:
         plt.close()
 
+def show_plot_mpinn(
+    domain_data: list[dict],
+    exact_fn=None,
+    interfaces: list[float] | None = None,
+    title: str = "MPINN: сравнение с аналитическим решением",
+    save_path: str | None = None,
+) -> None:
+    """
+    График MPINN 1D: несколько доменов + аналитическое решение + интерфейсы.
+
+    Parameters
+    ----------
+    domain_data : list[dict]
+        Для каждого домена:
+        {
+            'x':        (N,) — координаты,
+            'T_pred':   (N,) — предсказание PINN,
+            'T_exact':  (N,) — аналитическое решение (опционально),
+            'label':    str  — например, "Медь (λ=400)",
+            'color':    str  — цвет кривой (опционально),
+        }
+    exact_fn : callable | None
+        Функция точного решения `exact_fn(x) -> T`. Если задана, рисуется
+        на всём диапазоне одной синей линией.
+    interfaces : list[float] | None
+        Координаты интерфейсов для вертикальных линий.
+    save_path : str | None
+        Если задан — сохраняет PNG, иначе `plt.show()`.
+    """
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    # --- Аналитическое решение (на всём диапазоне) ---
+    if exact_fn is not None:
+        x_min = min(d['x'].min() for d in domain_data)
+        x_max = max(d['x'].max() for d in domain_data)
+        x_full = np.linspace(x_min, x_max, 1000)
+        T_full = exact_fn(x_full.reshape(-1, 1)).ravel()
+        ax.plot(x_full, T_full, 'b-', label='Аналитическое', linewidth=2, zorder=1)
+
+    # --- Домены ---
+    default_colors = ['#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf']
+    for i, d in enumerate(domain_data):
+        color = d.get('color', default_colors[i % len(default_colors)])
+        label = d.get('label', f'Домен {i}')
+        ax.plot(d['x'], d['T_pred'], ':', color=color,
+                label=label, linewidth=5, zorder=2)
+
+        # Точное решение домена (если есть) — тонкой пунктирной
+        if 'T_exact' in d:
+            ax.plot(d['x'], d['T_exact'], '--', color=color,
+                    linewidth=1, alpha=0.5, zorder=0)
+
+    # --- Интерфейсы ---
+    if interfaces:
+        for x_int in interfaces:
+            ax.axvline(x_int, color='gray', linestyle='--',
+                       linewidth=1.5, alpha=0.6, zorder=0)
+        # Подпись только для первого, чтобы не дублировать в легенде
+        ax.axvline(np.nan, color='gray', linestyle='--',
+                   linewidth=1.5, alpha=0.6, label='Интерфейс')
+
+    ax.set_title(title, fontsize=14)
+    ax.set_xlabel("x, м", fontsize=13)
+    ax.set_ylabel("T, К", fontsize=13)
+    ax.legend(loc='best', fontsize=11)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        plt.close()
 
 # ===================== 2D/3D графики =====================
 def plot_2d_contour(
@@ -176,29 +248,28 @@ def plot_2d(
     plt.show()
     plt.close()
 
+# ===================== 3D графики (с маскированием) =====================
+
 def plot_3d_slices(
     geom: "GeometryBase",
-    predict_fn: Callable[[np.ndarray], np.ndarray],
+    predict_fn: Callable,
     slice_planes: Optional[List[Dict[str, float]]] = None,
-    resolution: int = 30,
+    resolution: int = 60,
     title: str = "Срезы температуры",
     save_path: Optional[str] = None,
 ) -> None:
-    """Строит срезы температуры в 3D по плоскостям."""
+    """
+    Срезы 3D-геометрии по плоскостям с маскированием вне домена
+    (через geom.is_inside, если есть).
+    """
     if geom.dim != 3:
         raise ValueError("plot_3d_slices поддерживает только 3D геометрию.")
 
-    if hasattr(geom, "x_min") and hasattr(geom, "x_max"):
-        x_min, x_max = geom.x_min, geom.x_max
-        y_min, y_max = geom.y_min, geom.y_max
-        z_min, z_max = geom.z_min, geom.z_max
-    else:
-        try:
-            min_corner, max_corner = geom.bounds
-            x_min, y_min, z_min = min_corner[0], min_corner[1], min_corner[2]
-            x_max, y_max, z_max = max_corner[0], max_corner[1], max_corner[2]
-        except AttributeError:
-            raise ValueError("Не удалось определить границы геометрии.")
+    min_corner, max_corner = geom.bounds
+    x_min, y_min, z_min = [float(v) for v in min_corner]
+    x_max, y_max, z_max = [float(v) for v in max_corner]
+
+    has_mask = hasattr(geom, 'is_inside')
 
     if slice_planes is None:
         slice_planes = [
@@ -217,51 +288,108 @@ def plot_3d_slices(
         value = plane["value"]
 
         if axis == "x":
-            xs = np.full(resolution * resolution, value)
-            y = np.linspace(y_min, y_max, resolution)
-            z = np.linspace(z_min, z_max, resolution)
-            Y, Z = np.meshgrid(y, z, indexing="ij")
-            points = np.column_stack([xs.ravel(), Y.ravel(), Z.ravel()])
-            T_slice = predict_fn(points).reshape(resolution, resolution)
-            contour = ax.contourf(Y, Z, T_slice, levels=50, cmap="jet")
-            ax.set_xlabel("y, м")
-            ax.set_ylabel("z, м")
-            ax.set_title(f"x = {value:.2f}")
+            a = np.linspace(y_min, y_max, resolution)
+            b = np.linspace(z_min, z_max, resolution)
+            A, B = np.meshgrid(a, b, indexing="ij")
+            pts = np.column_stack([np.full(resolution**2, value),
+                                   A.ravel(), B.ravel()])
+            xlabel, ylabel = "y, м", "z, м"
         elif axis == "y":
-            ys = np.full(resolution * resolution, value)
-            x = np.linspace(x_min, x_max, resolution)
-            z = np.linspace(z_min, z_max, resolution)
-            X, Z = np.meshgrid(x, z, indexing="ij")
-            points = np.column_stack([X.ravel(), ys.ravel(), Z.ravel()])
-            T_slice = predict_fn(points).reshape(resolution, resolution)
-            contour = ax.contourf(X, Z, T_slice, levels=50, cmap="jet")
-            ax.set_xlabel("x, м")
-            ax.set_ylabel("z, м")
-            ax.set_title(f"y = {value:.2f}")
+            a = np.linspace(x_min, x_max, resolution)
+            b = np.linspace(z_min, z_max, resolution)
+            A, B = np.meshgrid(a, b, indexing="ij")
+            pts = np.column_stack([A.ravel(),
+                                   np.full(resolution**2, value),
+                                   B.ravel()])
+            xlabel, ylabel = "x, м", "z, м"
         elif axis == "z":
-            zs = np.full(resolution * resolution, value)
-            x = np.linspace(x_min, x_max, resolution)
-            y = np.linspace(y_min, y_max, resolution)
-            X, Y = np.meshgrid(x, y, indexing="ij")
-            points = np.column_stack([X.ravel(), Y.ravel(), zs.ravel()])
-            T_slice = predict_fn(points).reshape(resolution, resolution)
-            contour = ax.contourf(X, Y, T_slice, levels=50, cmap="jet")
-            ax.set_xlabel("x, м")
-            ax.set_ylabel("y, м")
-            ax.set_title(f"z = {value:.2f}")
+            a = np.linspace(x_min, x_max, resolution)
+            b = np.linspace(y_min, y_max, resolution)
+            A, B = np.meshgrid(a, b, indexing="ij")
+            pts = np.column_stack([A.ravel(), B.ravel(),
+                                   np.full(resolution**2, value)])
+            xlabel, ylabel = "x, м", "y, м"
         else:
             raise ValueError(f"Неизвестная ось: {axis}")
 
+        T = np.asarray(predict_fn(pts)).ravel()
+
+        if has_mask:
+            mask = np.asarray(geom.is_inside(jnp.asarray(pts)))
+            T = np.where(mask, T, np.nan)
+
+        T = T.reshape(resolution, resolution)
+
+        contour = ax.contourf(A, B, T, levels=50, cmap="jet")
         plt.colorbar(contour, ax=ax, label="T, К")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_aspect("equal")
+        ax.set_title(f"{axis} = {value:.3f}")
 
     plt.suptitle(title)
     plt.tight_layout()
-
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        plt.savefig(save_path, dpi=72, bbox_inches="tight")
+        plt.savefig(save_path, dpi=100, bbox_inches="tight")
     plt.show()
     plt.close()
+
+
+def plot_3d_isosurface(
+    geom: "GeometryBase",
+    predict_fn: Callable,
+    resolution: int = 40,
+    n_surfaces: int = 10,
+    title: str = "Изоповерхности T",
+    save_path: Optional[str] = None,
+) -> None:
+    """3D изоповерхности T через Plotly. Маска через geom.is_inside."""
+    if not HAS_PLOTLY:
+        raise ImportError("pip install plotly")
+    if geom.dim != 3:
+        raise ValueError("plot_3d_isosurface для 3D")
+
+    min_c, max_c = geom.bounds
+    x = np.linspace(float(min_c[0]), float(max_c[0]), resolution)
+    y = np.linspace(float(min_c[1]), float(max_c[1]), resolution)
+    z = np.linspace(float(min_c[2]), float(max_c[2]), resolution)
+    XX, YY, ZZ = np.meshgrid(x, y, z, indexing="ij")
+
+    pts = np.column_stack([XX.ravel(), YY.ravel(), ZZ.ravel()])
+    T = np.asarray(predict_fn(pts)).ravel()
+
+    if hasattr(geom, "is_inside"):
+        mask = np.asarray(geom.is_inside(jnp.asarray(pts)))
+        T = np.where(mask, T, np.nan)
+
+    T_3d = T.reshape(XX.shape)
+
+    fig = go.Figure(data=go.Isosurface(
+        x=XX.ravel(), y=YY.ravel(), z=ZZ.ravel(),
+        value=T_3d.ravel(),
+        isomin=float(np.nanmin(T_3d)),
+        isomax=float(np.nanmax(T_3d)),
+        surface_count=n_surfaces,
+        colorscale="Jet",
+        caps=dict(x_show=False, y_show=False, z_show=False),
+    ))
+    fig.update_layout(
+        title=title,
+        scene=dict(xaxis_title="x, м",
+                   yaxis_title="y, м",
+                   zaxis_title="z, м",
+                   aspectmode="data"),
+        width=900, height=700,
+    )
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        if save_path.endswith(".html"):
+            fig.write_html(save_path)
+        else:
+            fig.write_image(save_path)
+        print(f"Сохранено: {save_path}")
+    fig.show()
 
 
 def plot_3d_surface_plotly(
