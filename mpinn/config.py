@@ -94,3 +94,25 @@ def save_results_to_csv(results, csv_path, append=True):
 
     print(f"Сохранено: {csv_path} ({len(df)} строк)")
     return df
+
+
+def make_exact_fn_from_points(values):
+    """
+    Строит exact_fn, возвращающий фиксированный массив значений.
+
+    Parameters
+    ----------
+    values : array (M,) или (M, 1)
+        Значения решения в точках x_data.
+
+    Returns
+    -------
+    exact_fn : callable
+        Функция от (N, D), игнорирующая аргумент, возвращающая (M, 1).
+    """
+    values = jnp.asarray(values).reshape(-1, 1)
+
+    def exact_fn(_):
+        return values
+
+    return exact_fn

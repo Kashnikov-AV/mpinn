@@ -63,39 +63,40 @@ def save_plot(
     plt.close()
 
 
-def show_history(
-    history: Dict[str, List[float]],
-    save_path: Optional[str] = None,
-) -> None:
-    """Отображает историю обучения."""
-    steps = list(range(len(history["pde"])))
-    if not steps:
+def show_history(history, save_path=None):
+    # --- Длина истории ---
+    sample_key = next((k for k, v in history.items() if len(v) > 0), None)
+    if sample_key is None:
         print("Нет данных для отображения истории.")
         return
+    steps = list(range(len(history[sample_key])))
 
     plt.figure(figsize=(12, 7))
 
+    # --- PDE (сумма, если ключи с индексами) ---
     if "pde" in history:
         plt.semilogy(steps, history["pde"], "b", label="PDE", linewidth=2)
+    else:
+        pde_keys = sorted(k for k in history if k.startswith("pde_"))
+        if pde_keys:
+            pde_sum = [sum(vals) for vals in zip(*[history[k] for k in pde_keys])]
+            plt.semilogy(steps, pde_sum, "b", label="PDE (сумма)", linewidth=2)
 
+    # --- Общая ---
     if "total_loss" in history:
-        plt.semilogy(
-            steps, history["total_loss"], "g--", label="Общая", linewidth=2, alpha=0.7
-        )
+        plt.semilogy(steps, history["total_loss"], "g--",
+                     label="Общая", linewidth=2, alpha=0.7)
 
-    bc_keys = [k for k in history.keys() if k.startswith("bc_")]
+    # --- BC и интерфейсы ---
+    bc_keys = [k for k in history
+               if (k.startswith("bc_") or k.startswith("interface_"))
+               and k not in ("bc_total",)]
     colors = ["r", "c", "m", "y", "k", "orange", "purple"]
     for i, key in enumerate(bc_keys):
         color = colors[i % len(colors)]
-        label = key.replace("bc_", "ГУ ")
-        plt.semilogy(
-            steps,
-            history[key],
-            f"{color}--",
-            label=label,
-            linewidth=2,
-            alpha=0.7,
-        )
+        label = key.replace("bc_", "ГУ ").replace("interface_", "Интерфейс ")
+        plt.semilogy(steps, history[key], f"{color}--",
+                     label=label, linewidth=1.5, alpha=0.7)
 
     plt.title("История обучения")
     plt.xlabel("Эпохи")

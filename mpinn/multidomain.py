@@ -1,463 +1,401 @@
 """
-Реализация мультидоменной ФИНС (MPINN).
+MPINN: мультидоменная физически-информированная нейронная сеть.
 
-MPINN координирует несколько независимых экземпляров PINN, каждый из которых обучается на своей области,
-одновременно обеспечивая условия непрерывности на границах раздела доменов.
-
-Каждый домен имеет свои:
-- Геометрию (Interval для 1D)
-- Функцию УЧП
-- Конфигурации ГУ (только для ВНЕШНИХ границ, НЕ для интерфейсов)
-- Коллокационные точки
-- Веса для потерь УЧП и ГУ
-
-Условия на интерфейсах обрабатываются отдельно через interface_loss.
+Архитектура: координатор (MPINN) управляет списком независимых экземпляров PINN.
+Каждый PINN инкапсулирует свою сеть, оптимизатор, физику и граничные условия.
+Обучение совместное (один train_step), обновление параметров раздельное.
 """
 
 import time
-from collections.abc import Callable
-from functools import partial
-from typing import Any
-
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import optax
 from flax import nnx
-from jax import jit, value_and_grad
-
-from .geom import Interval
-from .pinn_core import PINN, FCNet
-
-
-def compute_interface_loss(
-    models: tuple[Any], interfaces: tuple[float], all_lambdas: tuple[float]
-) -> list[float]:
-    """
-    Вычисление потерь на интерфейсах между соседними доменами.
-
-    Обеспечивает непрерывность решения и потока на границах раздела доменов:
-    - Непрерывность T: (T0 - T1)^2
-    - Непрерывность потока: (lambda_left * dT/dx|left - lambda_right * dT/dx|right)^2
-
-    Args:
-        models: Кортеж нейросетевых моделей для каждого домена
-        interfaces: Кортеж x-координат интерфейсов
-        all_lambdas: Кортеж значений лямбда (теплопроводности) для каждого домена
-
-    Returns:
-        Список значений потерь на интерфейсах (по одному на каждый интерфейс)
-    """
-    interface_losses = []
-
-    for i, x_int in enumerate(interfaces):
-        m_l, m_r = models[i], models[i + 1]
-        l_l, l_r = all_lambdas[i], all_lambdas[i + 1]
-
-        # Evaluate solutions at interface
-        t_l = m_l(jnp.array([[x_int]])).ravel()[0]
-        t_r = m_r(jnp.array([[x_int]])).ravel()[0]
-        cont_t = (t_l - t_r) ** 2
-
-        # Evaluate gradients at interface using autograd
-        def make_eval_fn(model):
-            return lambda xv: model(jnp.array([[xv]])).ravel()[0]
-
-        eval_l = make_eval_fn(m_l)
-        eval_r = make_eval_fn(m_r)
-
-        dt_l = jax.grad(eval_l)(x_int)
-        dt_r = jax.grad(eval_r)(x_int)
-        cont_f = (l_l * dt_l - l_r * dt_r) ** 2
-
-        interface_losses.append(cont_t + cont_f)
-
-    return interface_losses
+from functools import partial
+from .pinn_core import PINN
 
 
 class MPINN:
-    """
-    Мультидоменная физически информированная нейронная сеть (ФИНС).
-
-    Координирует обучение нескольких экземпляров PINN на различных пространственных доменах,
-    обеспечивая граничные условия только на внешних границах и ограничения непрерывности на интерфейсах.
-
-    Attributes:
-        boundaries: Кортеж координат границ доменов (включая интерфейсы)
-        n_domains: Количество подобластей
-        interfaces: Кортеж x-координат интерфейсов
-        pinn_instances: Список объектов PINN, по одному на каждый домен
-        domain_configs: Список конфигурационных словарей для каждого домена
-    """
-
     def __init__(
         self,
         domain_configs: list[dict],
-        interfaces: tuple[float, ...],
-        all_lambdas: tuple[float, ...],
+        interface_pairs: list[tuple],        # [(idx1, name1, idx2, name2), ...]
+        n_interface_points: int,
         interface_weight: float = 1.0,
         rng: jax.Array | None = None,
     ):
         """
-        Инициализация MPINN с несколькими нейронными сетями для многодоменных задач.
-
-        Каждый domain_config должен содержать:
-        - 'geom': Геометрия Interval для домена
-        - 'pde': Функция остатка УЧП для этого домена
-        - 'bc_configs': Список конфигураций ГУ только для ВНЕШНИХ границ
-        - 'n_points': Количество коллокационных точек во внутренней области
-        - 'weights': Кортеж (pde_weight, bc_weight) для этого домена
-        - 'net': Опционально предварительно созданная FCNet (если не предоставлена, будет использована архитектура по умолчанию)
+        Инициализация MPINN.
 
         Args:
-            domain_configs: Список словарей, по одному на каждый домен с геометрией, УЧП, конфигурациями ГУ, весами
-            interfaces: Кортеж x-координат интерфейсов между доменами
-            all_lambdas: Кортеж значений теплопроводности для каждого домена
-            interface_weight: Вес для условий непрерывности на интерфейсах
-            rng: Случайный ключ JAX
+            domain_configs: Список конфигураций доменов. Каждая конфигурация:
+                {
+                    'geom':       GeometryBase,           # Геометрия домена
+                    'net':        nnx.Module,             # Сеть домена
+                    'opt':        optax.GradientTransformation,
+                    'pde_fn':     Callable,
+                    'bc_configs': list[dict],             # ГУ на ВНЕШНИХ границах
+                    'n_points':   int,                    # Точек коллокации
+                    'weights':    tuple[float, float],    # (w_pde, w_bc)
+                    'lam':        float = 1.0,            # Теплопроводность для интерфейса
+                }
+            interface_pairs: Список кортежей (idx1, name1, idx2, name2).
+            n_interface_points: Количество точек на каждом интерфейсе.
+            interface_weight: Вес потерь на интерфейсах.
+            rng: Ключ JAX.
         """
         self.n_domains = len(domain_configs)
-        self.interfaces = interfaces
-        self.all_lambdas = all_lambdas
-        self.interface_weight = interface_weight
         self.domain_configs = domain_configs
+        self.interface_pairs = interface_pairs
+        self.interface_weight = interface_weight
 
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
-        # Build boundaries from geometries
-        self.boundaries = tuple(
-            (cfg['geom'].x0, cfg['geom'].x1) for cfg in domain_configs
-        )
-        
-        # Generate collocation points for each domain
+        # --- 1. Список PINN, по одному на домен ---
+        # Каждый PINN инкапсулирует свои graphdef, params, tx, opt_state, loss_fn
+        self.pinns = [
+            PINN(
+                net=cfg['net'],
+                opt=cfg['opt'],
+                weights=cfg['weights'],
+                pde_fn=cfg['pde_fn'],
+                bc_configs=cfg['bc_configs'],
+                lam=cfg['lam'],
+                source_fn=cfg.get('source_fn', 0.0),
+            )
+            for cfg in domain_configs
+        ]
+
+        # --- 2. Точки коллокации ---
         col_keys = jax.random.split(rng, self.n_domains)
         self.x_collocation = tuple(
             cfg['geom'].sample_interior(cfg['n_points'], rng=k)
             for cfg, k in zip(domain_configs, col_keys)
         )
 
-        # Create independent PINN instances for each domain with their own weights
-        self.pinn_instances = []
-        for cfg in domain_configs:
-            net = cfg.get('net')
-            if net is None:
-                # Default network creation if not provided
-                raise ValueError("Each domain_config must include a 'net' key with FCNet instance")
-            pinn = PINN(net, cfg['opt'], weights=cfg['weights'])
-            self.pinn_instances.append(pinn)
+        # --- 3. Интерфейсные точки ---
+        itf_keys = jax.random.split(rng, len(interface_pairs))
+        self.interface_data = []            # (pts, n1, n2, idx1, idx2)
+        for (idx1, name1, idx2, name2), k in zip(interface_pairs, itf_keys):
+            geom1 = domain_configs[idx1]['geom']
+            geom2 = domain_configs[idx2]['geom']
+            pts, n1, n2 = geom1.sample_interface(
+                other_geom=geom2,
+                n_points=n_interface_points,
+                self_interface_name=name1,
+                other_interface_name=name2,
+                rng=k,
+            )
+            self.interface_data.append((pts, n1, n2, idx1, idx2))
 
-        self.graphdefs = tuple(p.graphdef for p in self.pinn_instances)
-        self.params = tuple(p.params for p in self.pinn_instances)
-        self.txs = tuple(p.tx for p in self.pinn_instances)
-        self.opt_states = tuple(p.opt_state for p in self.pinn_instances)
+        # --- 4. lambda по доменам (для потока на интерфейсе) ---
+        self.lambdas = tuple(cfg.get('lam', 1.0) for cfg in domain_configs)
 
-    def create_loss_fn(self, phys: Any | None = None):
-        """
-        Создание составной функции потерь для многодоменного обучения.
+        # --- 5. Общий loss_fn создаётся один раз ---
+        self.loss_fn = self.create_loss_fn()
 
-        Полные потери включают:
-        - Остатки УЧП в каждом домене (вычисляются через PINN.create_loss_fn)
-        - Потери ГУ на ВНЕШНИХ границах только (через bc_configs в каждом домене)
-        - Условия непрерывности на интерфейсах (решение и поток)
+    # ------------------------------------------------------------------ loss
 
-        Args:
-            phys: Опциональный объект PhysicsParams (может использоваться для глобальных параметров)
+    def create_loss_fn(self):
+        """Собирает общий лосс: PDE + BC всех доменов + интерфейсные условия."""
+        pinns = self.pinns
+        x_collocs = self.x_collocation
+        itf_data = self.interface_data
+        lambdas = self.lambdas
+        itf_w = self.interface_weight
 
-        Returns:
-            Функция потерь с сигнатурой (params_tuple,) -> (total_loss, aux_losses)
-        """
         def total_loss(params_tuple):
-            # Reconstruct models from graphdefs and parameters
+            # params_tuple[i] — params i-го PINN
             models = tuple(
-                nnx.merge(g, p) for g, p in zip(self.graphdefs, params_tuple)
+                nnx.merge(p.graphdef, p_params)
+                for p, p_params in zip(pinns, params_tuple)
             )
 
-            # Compute PDE + BC losses for each domain using their own loss_fn
+            # --- PDE + BC по доменам через PINN.loss_fn ---
             domain_losses = []
-            all_pde_losses = {}
-            all_bc_losses = {}
+            pde_losses = []
+            bc_losses = []
+            for pinn, model, x_d in zip(pinns, models, x_collocs):
+                d_loss, aux = pinn.loss_fn(model, x_d)     # (total, (pde, *bcs))
+                domain_losses.append(d_loss)
+                pde_losses.append(aux[0])
+                bc_losses.append(sum(aux[1:]) if len(aux) > 1 else 0.0)
 
-            for i, (pinn, model, x_d, cfg) in enumerate(
-                zip(self.pinn_instances, models, self.x_collocation, self.domain_configs)
-            ):
-                # Get domain-specific loss function
-                pde_fn = cfg['pde']
-                bc_configs = cfg['bc_configs']
-                
-                # Create loss function for this domain
-                domain_loss_fn = pinn.create_loss_fn(pde_fn, bc_configs, phys)
-                
-                # Compute loss for this domain
-                domain_total, aux = domain_loss_fn(model, x_d)
-                
-                domain_losses.append(domain_total)
-                all_pde_losses[f"pde_{i}"] = float(aux[0])
-                
-                # BC losses from aux[1:]
-                for j, bc_loss in enumerate(aux[1:]):
-                    all_bc_losses[f"bc_domain{i}_{j}"] = float(bc_loss)
+            # --- Интерфейсные лоссы ---
+            interface_losses = []
+            for pts, n1, n2, idx1, idx2 in itf_data:
+                m1, m2 = models[idx1], models[idx2]
+                lam1, lam2 = lambdas[idx1], lambdas[idx2]
 
-            # Compute interface losses
-            interface_losses = compute_interface_loss(
-                models, self.interfaces, self.all_lambdas
-            )
-            all_interface_losses = {
-                f"interface_{i}": float(loss) for i, loss in enumerate(interface_losses)
-            }
+                # Непрерывность T
+                T1 = m1(pts).ravel()
+                T2 = m2(pts).ravel()
+                cont_T = jnp.mean((T1 - T2) ** 2)
 
-            # Sum domain losses
-            sum_domain_losses = sum(domain_losses)
-            
-            # Add weighted interface losses
-            interface_loss_total = self.interface_weight * sum(interface_losses)
-            
-            total = sum_domain_losses + interface_loss_total
+                # Непрерывность потока: lambda1*∂T1/∂n1 + lambda2*∂T2/∂n2 = 0
+                def grad_normal(model, points, normals):
+                    def predict_one(x):
+                        return model(x.reshape(1, -1)).ravel()[0]
+                    g = jax.vmap(jax.grad(predict_one))(points)
+                    return jnp.sum(g * normals, axis=1)
 
-            # Collect all losses for logging
-            all_losses = {
-                **all_pde_losses,
-                **all_bc_losses,
-                **all_interface_losses,
-            }
+                dT1n = grad_normal(m1, pts, n1)
+                dT2n = grad_normal(m2, pts, n2)
+                cont_flux = jnp.mean((lam1 * dT1n + lam2 * dT2n) ** 2)
 
-            # Return total loss and individual losses for logging
-            aux_losses = (
+                interface_losses.append(cont_T + cont_flux)
+
+            total = sum(domain_losses) + itf_w * sum(interface_losses)
+
+            aux_out = (
                 *domain_losses,
                 *interface_losses,
+                *pde_losses,
+                *bc_losses,
             )
-            return total, aux_losses
+            return total, aux_out
 
         return total_loss
 
-    @partial(jit, static_argnames=["self"])
-    def train_step(
-        self,
-        params: tuple,
-        loss_fn: Callable,
-    ):
+    # --------------------------------------------------------------- training
+
+    @partial(jax.jit, static_argnames=['self', 'loss_fn'])
+    def train_step(self, params_list, opt_states, loss_fn):
         """
-        Выполнение одного шага обучения для всех доменов.
-
-        Args:
-            params: Кортеж параметров для каждой PINN
-            loss_fn: Функция потерь, созданная через create_loss_fn (уже имеет привязку x_collocation)
-
-        Returns:
-            Кортеж из (new_params, new_opt_states, total_loss, aux_losses)
+        Один шаг обучения.
+        params_list — кортеж params (по одному на PINN)
+        opt_states — кортеж opt_state (по одному на PINN)
         """
-        def closure(p):
-            return loss_fn(p)
+        def closure(pl):
+            return loss_fn(pl)
 
-        (total, aux), grads = value_and_grad(closure, has_aux=True)(params)
+        (total, aux), grads_list = jax.value_and_grad(closure, has_aux=True)(params_list)
 
-        # Update each domain's parameters independently
         new_params = []
         new_opt_states = []
-        for p, g, tx, os in zip(params, grads, self.txs, self.opt_states):
+        for p, g, tx, os in zip(params_list, grads_list, self.txs, opt_states):
             updates, new_os = tx.update(g, os)
             new_params.append(optax.apply_updates(p, updates))
             new_opt_states.append(new_os)
 
         return tuple(new_params), tuple(new_opt_states), total, aux
 
-    def train_loop(
-        self,
-        num_steps: int,
-        loss_fn: Callable,
-        loss_names: tuple[str, ...],
-        log_interval: int = 100,
-    ):
-        """
-        Цикл обучения для MPINN.
+    @property
+    def txs(self):
+        """Оптимизаторы всех PINN."""
+        return tuple(p.tx for p in self.pinns)
 
-        Args:
-            num_steps: Количество шагов обучения
-            loss_fn: Функция потерь (уже имеет привязку x_collocation)
-            loss_names: Имена компонентов потерь для логирования
-            log_interval: Частота логирования
+    @property
+    def params(self):
+        """Текущие params всех PINN."""
+        return tuple(p.params for p in self.pinns)
 
-        Returns:
-            Словарь, содержащий историю обучения
-        """
-        history = {"steps": [], "total_loss": []}
+    @property
+    def opt_states(self):
+        return tuple(p.opt_state for p in self.pinns)
+
+    def fit(self, epochs: int = 1000, log_interval: int = 100):
+        loss_fn = self.loss_fn
+        n_itf = len(self.interface_data)
+        loss_names = (
+            *[f"domain_{i}"    for i in range(self.n_domains)],
+            *[f"interface_{i}" for i in range(n_itf)],
+            *[f"pde_{i}"       for i in range(self.n_domains)],
+            *[f"bc_{i}"        for i in range(self.n_domains)],
+        )
+
+        history = {"total_loss": []}
         for name in loss_names:
             history[name] = []
 
-        curr_params, curr_opt_states = self.params, self.opt_states
-        for step in range(num_steps):
+        curr_params = self.params
+        curr_opt_states = self.opt_states
+
+        t0 = time.perf_counter()
+        for step in range(epochs):
             curr_params, curr_opt_states, total, aux = self.train_step(
-                curr_params, loss_fn
+                curr_params, curr_opt_states, loss_fn
             )
-            if step % log_interval == 0 or step == num_steps - 1:
+            if step % log_interval == 0 or step == epochs - 1:
                 history["total_loss"].append(float(total))
                 for name, val in zip(loss_names, aux):
                     history[name].append(float(val))
 
-        self.params = curr_params
-        self.opt_states = curr_opt_states
-        return history
+        # --- Записываем params/opt_state обратно в PINN ---
+        for pinn, p, os in zip(self.pinns, curr_params, curr_opt_states):
+            pinn.params = p
+            pinn.opt_state = os
 
-    def fit(
-        self,
-        phys: Any | None = None,
-        epochs: int = 1000,
-        log_interval: int = 100,
-    ):
-        """
-        Обучение модели MPINN.
+        return history, time.perf_counter() - t0
 
-        Args:
-            phys: Опциональный объект PhysicsParams, передаваемый в create_loss_fn
-            epochs: Количество эпох обучения
-            log_interval: Частота логирования
-
-        Returns:
-            Кортеж из (history_dict, training_time)
-        """
-        loss_fn = self.create_loss_fn(phys)
-        loss_names = (
-            *[f"domain_{i}_loss" for i in range(self.n_domains)],
-            *[f"interface_{i}" for i in range(len(self.interfaces))],
-        )
-
-        start_time = time.perf_counter()
-        history = self.train_loop(epochs, loss_fn, loss_names, log_interval)
-        end_time = time.perf_counter()
-
-        return history, end_time - start_time
+    # --------------------------------------------------------------- predict
 
     def predict(self, x_test):
-        """
-        Предсказание значений температуры для заданных координат x.
+        """Предсказание по всем доменам с учетом их геометрии (1D/2D/3D)."""
+        x_flat = jnp.atleast_1d(x_test)
+        dim = self.domain_configs[0]['geom'].dim
+        if x_flat.ndim == 1:
+            x_flat = x_flat.reshape(-1, dim)
 
-        Args:
-            x_test: Входные координаты x (массивоподобный объект)
+        t_pred = jnp.full((x_flat.shape[0],), jnp.nan)
 
-        Returns:
-            Предсказанные значения температуры
-        """
-        models = tuple(nnx.merge(g, p) for g, p in zip(self.graphdefs, self.params))
-        x_flat = jnp.atleast_1d(x_test.ravel())
-        t_pred = jnp.zeros_like(x_flat)
+        for i, pinn in enumerate(self.pinns):
+            geom = self.domain_configs[i]['geom']
+            model = nnx.merge(pinn.graphdef, pinn.params)
 
-        for i, (b0, b1) in enumerate(zip(self.boundaries[:-1], self.boundaries[1:])):
-            if i == self.n_domains - 1:
-                mask = (x_flat >= b0) & (x_flat <= b1)
+            if hasattr(geom, 'is_inside'):
+                mask = geom.is_inside(x_flat)
             else:
-                mask = (x_flat >= b0) & (x_flat < b1)
+                bmin, bmax = geom.bounds
+                mask = jnp.all((x_flat >= bmin) & (x_flat <= bmax), axis=1)
+
+            # Не перезаписываем точки, уже отнесенные к другим доменам
+            already = ~jnp.isnan(t_pred)
+            mask = mask & (~already)
 
             if jnp.any(mask):
-                x_dom = x_flat[mask].reshape(-1, 1)
-                t_pred = t_pred.at[mask].set(models[i](x_dom).ravel())
+                preds = model(x_flat[mask]).ravel()
+                t_pred = t_pred.at[mask].set(preds)
+
         return t_pred.reshape(-1, 1)
 
-    def compute_metrics(self, x_test, t_pred, t_exact):
-        """
-        Вычисление метрик ошибки между предсказанными и точными решениями.
+    # --------------------------------------------------------------- helpers
 
-        Делегирует PINN.compute_metrics для согласованности.
+    def evaluate(self, x_test, exact_fn):
+        t_pred = self.predict(x_test).ravel()
+        t_exact = exact_fn(x_test).ravel()
+        diff = t_pred - t_exact
+        return {
+            "mse":  float(jnp.mean(diff ** 2)),
+            "mae":  float(jnp.mean(jnp.abs(diff))),
+            "rmse": float(jnp.sqrt(jnp.mean(diff ** 2))),
+            "max_err":  float(jnp.max(jnp.abs(diff))),
+        }, t_pred, t_exact
 
-        Args:
-            x_test: Входные координаты x
-            t_pred: Предсказанные температуры
-            t_exact: Точные температуры
+    def _make_rl2_evaluator(self, x_test, exact_fn):
+        graphdefs = tuple(p.graphdef for p in self.pinns)
+        domain_configs = self.domain_configs
+        dim = domain_configs[0]['geom'].dim
 
-        Returns:
-            Словарь метрик ошибки (MAPE, MAE, MSE, RMSE, max_error)
-        """
-        # Use the first PINN instance's compute_metrics for consistency
-        return self.pinn_instances[0].compute_metrics(x_test, t_pred, t_exact)
+        @jax.jit
+        def _rl2(params_list):
+            x_flat = jnp.atleast_1d(x_test)
+            if x_flat.ndim == 1:
+                x_flat = x_flat.reshape(-1, dim)
 
-    def evaluate(self, x_test, exact_fn, phys, bc_names=None):
-        """
-        Оценка модели относительно точного решения.
+            t_pred = jnp.full((x_flat.shape[0],), jnp.nan)
+            for i, (g, p) in enumerate(zip(graphdefs, params_list)):
+                model = nnx.merge(g, p)
+                geom = domain_configs[i]['geom']
+                if hasattr(geom, 'is_inside'):
+                    mask = geom.is_inside(x_flat)
+                else:
+                    bmin, bmax = geom.bounds
+                    mask = jnp.all((x_flat >= bmin) & (x_flat <= bmax), axis=1)
+                already = ~jnp.isnan(t_pred)
+                mask = mask & (~already)
+                preds = model(x_flat).ravel()
+                t_pred = jnp.where(mask, preds, t_pred)
 
-        Args:
-            x_test: Тестовые координаты x
-            exact_fn: Функция вычисления точного решения
-            phys: Объект PhysicsParams
-            bc_names: Опциональные имена граничных условий
+            t_exact = exact_fn(x_test).ravel()
+            return jnp.linalg.norm(t_pred - t_exact) / (jnp.linalg.norm(t_exact) + 1e-12)
 
-        Returns:
-            Кортеж из (metrics_dict, predicted_values, exact_values)
-        """
-        t_pred = self.predict(x_test)
-        t_exact = exact_fn(x_test.ravel(), phys)
-        metrics = self.compute_metrics(x_test, t_pred, t_exact.reshape(-1, 1))
-        if bc_names:
-            metrics["bc_left"] = bc_names[0]
-            metrics["bc_right"] = bc_names[1] if len(bc_names) > 1 else bc_names[0]
-        return metrics, t_pred, t_exact
+        return _rl2
 
-    def save_plot(
+    def _snapshot_params(self):
+        return tuple(jax.tree.map(jnp.copy, p) for p in self.params)
+
+    def _restore_params(self, snapshot):
+        for pinn, p in zip(self.pinns, snapshot):
+            pinn.params = p
+
+    def fit_adaptive(
         self,
         x_test,
-        t_pred,
-        t_exact,
-        phys,
-        save_path,
-        title="Сравнение MPINN и точного решения",
+        exact_fn,
+        target_rl2: float = 1e-3,
+        block_epochs: int = 500,
+        max_epochs: int = 50_000,
+        log_interval: int = 500,
+        patience: int = 5,
+        tol: float = 1e-6,
     ):
         """
-        Сохранение графика сравнения предсказанного и точного решений.
+        Адаптивное обучение MPINN блоками до достижения целевого RL2.
 
-        Использует унифицированный модуль построения графиков с маркерами интерфейсов.
+        Parameters
+        ----------
+        x_test : array (M, D)
+            Тестовые точки, по которым оценивается RL2.
+        exact_fn : callable
+            Функция точного решения, принимающая x_test.
+        target_rl2 : float
+            Целевое значение относительной L2-ошибки.
+        block_epochs : int
+            Длина одного блока обучения в эпохах.
+        max_epochs : int
+            Максимальное число эпох.
+        log_interval : int
+            Частота логирования внутри блока.
+        patience : int
+            Число блоков без улучшения до остановки.
+        tol : float
+            Минимальное улучшение, считающееся прогрессом.
 
-        Args:
-            x_test: Тестовые координаты x
-            t_pred: Предсказанные температуры
-            t_exact: Точные температуры
-            phys: Объект PhysicsParams
-            save_path: Путь для сохранения фигуры
-            title: Заголовок графика
+        Returns
+        -------
+        history : dict
+            История обучения, склеенная по блокам.
+        total_time : float
+            Полное время обучения в секундах.
         """
-        _fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(
-            x_test.ravel(), t_exact, "b-", label="Аналитическое решение", linewidth=2
-        )
-        ax.plot(x_test.ravel(), t_pred, "r:", label="ФИНС", linewidth=6)
+        import time
 
-        # Mark interfaces
-        for x_int in phys.interfaces:
-            ax.axvline(x=x_int, color="gray", linestyle=":", alpha=0.5)
+        eval_fn = self._make_rl2_evaluator(x_test, exact_fn)
 
-        ax.set_xlabel("x, м")
-        ax.set_ylabel("T, К")
-        ax.legend(fontsize=14)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=72, bbox_inches="tight")
-        plt.close()
+        history = {}
+        total_epochs = 0
+        best_rl2 = float('inf')
+        best_params = self._snapshot_params()
+        best_epoch = 0
+        no_improve = 0
 
-    def show_plot(
-        self, x_test, t_pred, t_exact, phys, title="Сравнение MPINN и точного решения"
-    ):
-        """
-        Отображение графика сравнения предсказанного и точного решений.
+        t0 = time.perf_counter()
 
-        Использует унифицированный модуль построения графиков с маркерами интерфейсов.
+        while total_epochs < max_epochs:
+            block = min(block_epochs, max_epochs - total_epochs)
 
-        Args:
-            x_test: Тестовые координаты x
-            t_pred: Предсказанные температуры
-            t_exact: Точные температуры
-            phys: Объект PhysicsParams
-            title: Заголовок графика
-        """
-        _fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(
-            x_test.ravel(), t_exact, "b-", label="Аналитическое решение", linewidth=2
-        )
-        ax.plot(x_test.ravel(), t_pred, "r:", label="ФИНС", linewidth=6)
+            block_history, _ = self.fit(epochs=block, log_interval=log_interval)
+            total_epochs += block
 
-        # Mark interfaces
-        for x_int in phys.interfaces:
-            ax.axvline(x=x_int, color="gray", linestyle=":", alpha=0.5)
+            for key, values in block_history.items():
+                history.setdefault(key, []).extend(values)
 
-        ax.set_xlabel("x, м")
-        ax.set_ylabel("T, К")
-        ax.legend(fontsize=14)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.show()
+            rl2 = float(eval_fn(self.params))
+
+            if rl2 < best_rl2 - tol:
+                best_rl2 = rl2
+                best_params = self._snapshot_params()
+                best_epoch = total_epochs
+                no_improve = 0
+            else:
+                no_improve += 1
+
+            print(f"[block {total_epochs:6d}] RL2 = {rl2:.4e} "
+                f"(best = {best_rl2:.4e} at {best_epoch}, "
+                f"patience = {no_improve}/{patience})")
+
+            if rl2 < target_rl2:
+                print(f"Target RL2 = {target_rl2:.2e} достигнут на эпохе {total_epochs}")
+                break
+
+            if no_improve >= patience:
+                print(f"Ранняя остановка: нет прогресса за {patience} блоков")
+                break
+
+        # восстановление лучших параметров
+        self._restore_params(best_params)
+
+        total_time = time.perf_counter() - t0
+        return history, total_time
